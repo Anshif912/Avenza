@@ -1,0 +1,18 @@
+<svg width="64" height="64" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="avzGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stopColor="#38bdf8" />
+      <stop offset="50%" stopColor="#06b6d4" />
+      <stop offset="100%" stopColor="#10b981" />
+    </linearGradient>
+    <linearGradient id="avzGlow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stopColor="#06b6d4" stopOpacity="0.5" />
+      <stop offset="100%" stopColor="#3b82f6" stopOpacity="0.1" />
+    </linearGradient>
+  </defs>
+  <rect width="32" height="32" rx="8" fill="#070b14" stroke="#1c2d5a" stroke-width="1" />
+  <rect width="32" height="32" rx="8" fill="url(#avzGlow)" />
+  <path d="M 6 25 L 16 6 L 26 25" stroke="url(#avzGrad)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+  <path d="M 8 20 L 12.5 20 L 14.5 13 L 17 24 L 19 18.5 L 20.5 20 L 24 20" stroke="#38bdf8" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+  <circle cx="16" cy="6" r="1.8" fill="#38bdf8" />
+</svg>

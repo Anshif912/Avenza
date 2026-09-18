@@ -1,0 +1,191 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================================
+   AVENZA — CLINICAL COMMAND CENTER CSS FOUNDATION
+   Design Language: Medical-tech HUD · Dark-first · Precision
+   ============================================================ */
+
+@layer base {
+  :root {
+    /* Surface hierarchy */
+    --color-base:      #070b14;
+    --color-surface-0: #0a0f1e;
+    --color-surface-1: #0d1527;
+    --color-surface-2: #111c38;
+
+    /* Border hierarchy */
+    --color-border-0: #1c2d5a;
+    --color-border-1: #263d7a;
+    --color-border-active: #0e4d8a;
+
+    /* Clinical signal palette */
+    --color-cyan:   #06b6d4;
+    --color-teal:   #14b8a6;
+    --color-violet: #8b5cf6;
+    --color-blue:   #3b82f6;
+
+    /* Semantic status palette */
+    --color-ok:       #10b981;
+    --color-watch:    #06b6d4;
+    --color-warn:     #f59e0b;
+    --color-critical: #ef4444;
+    --color-inactive: #64748b;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+  }
+
+  body {
+    background-color: var(--color-base);
+    color: #f1f5f9;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Selection highlight */
+  ::selection {
+    background: rgba(6, 182, 212, 0.3);
+    color: #e2e8f0;
+  }
+}
+
+/* ============================================================
+   MEDICAL-GRADE SCROLLBARS
+   ============================================================ */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: #070b14; }
+::-webkit-scrollbar-thumb { background: #1c2d5a; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #06b6d4; }
+
+/* ============================================================
+   UTILITY: ANIMATIONS
+   ============================================================ */
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes scanLine {
+  0%   { transform: translateY(0); }
+  100% { transform: translateY(100%); }
+}
+@keyframes dataStream {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+.animate-fade-in-up {
+  animation: fadeInUp 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+.animate-fade-in {
+  animation: fadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* ============================================================
+   UTILITY: GLOW CLASSES (use sparingly — active/critical states only)
+   ============================================================ */
+.glow-cyan    { box-shadow: 0 0 12px rgba(6, 182, 212, 0.25); }
+.glow-violet  { box-shadow: 0 0 12px rgba(139, 92, 246, 0.25); }
+.glow-green   { box-shadow: 0 0 12px rgba(16, 185, 129, 0.25); }
+.glow-red     { box-shadow: 0 0 14px rgba(239, 68, 68, 0.35); }
+.glow-amber   { box-shadow: 0 0 12px rgba(245, 158, 11, 0.25); }
+
+/* ============================================================
+   UTILITY: GRID PATTERNS (HUD aesthetic)
+   ============================================================ */
+.bg-grid-subtle {
+  background-image:
+    linear-gradient(rgba(6, 182, 212, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(6, 182, 212, 0.03) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+
+/* ============================================================
+   UTILITY: CHART CONTAINER
+   ============================================================ */
+.chart-container {
+  background: #050910;
+  border: 1px solid #1c2d5a;
+  border-radius: 12px;
+}
+
+/* ============================================================
+   UTILITY: CLINICAL DIVIDER
+   ============================================================ */
+.clinical-divider {
+  border-top: 1px solid #1c2d5a;
+}
+
+/* ============================================================
+   UTILITY: SCAN LINE EFFECT (live telemetry pages)
+   ============================================================ */
+.scan-effect::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to bottom,
+    transparent 0%,
+    rgba(6, 182, 212, 0.015) 50%,
+    transparent 100%
+  );
+  pointer-events: none;
+}
+
+/* ============================================================
+   RECHARTS OVERRIDES — dark theme
+   ============================================================ */
+.recharts-tooltip-wrapper .recharts-default-tooltip {
+  background-color: #0d1527 !important;
+  border-color: #1c2d5a !important;
+  border-radius: 8px !important;
+  font-size: 11px !important;
+  font-family: 'JetBrains Mono', monospace !important;
+}
+.recharts-legend-item-text {
+  font-size: 10px !important;
+  font-family: 'JetBrains Mono', monospace !important;
+}
+
+/* ============================================================
+   INPUT RANGE — styled thermal/weight sliders
+   ============================================================ */
+input[type="range"].clinical-slider {
+  -webkit-appearance: none;
+  width: 100%;
+  height: 4px;
+  border-radius: 2px;
+  background: #1c2d5a;
+  outline: none;
+  cursor: pointer;
+}
+input[type="range"].clinical-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #06b6d4;
+  box-shadow: 0 0 6px rgba(6, 182, 212, 0.4);
+  cursor: pointer;
+}
+input[type="range"].clinical-slider::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #06b6d4;
+  border: none;
+  cursor: pointer;
+}
