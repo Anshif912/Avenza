@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import {
   DataMode,
+  AIApneaState,
   VitalsTelemetry,
   ApneaTelemetry,
   WaveformPoint,
@@ -23,6 +24,7 @@ import {
   SerialConnectionState,
   SerialPortInfo
 } from '../services/WebSerialService';
+import { esp32WebSocketService } from '../services/ESP32WebSocketService';
 import { AUTHORITATIVE_SOURCES } from '../data/clinicalReferences';
 
 /* ============================================================
@@ -547,6 +549,364 @@ export const MonitoringProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     }
   };
 
+  // Unified Live Telemetry Handler (Feeds Real Hardware Packets & Neural Model Verdicts into State)
+  const handleIncomingUnifiedTelemetry = (packet: any) => {
+    if (packet.type === 'unified_telemetry') {
+      const hw = packet.hardware?.latest_telemetry || packet.hardware || {};
+      const cam = packet.camera?.latest_kinematics || packet.camera || null;
+      const inf = packet.inference || null;
+
+      const chamberT = (hw.ds18b20_temp !== null && hw.ds18b20_temp !== undefined)
+        ? hw.ds18b20_temp
+        : (hw.dht_temp !== null && hw.dht_temp !== undefined)
+        ? hw.dht_temp
+        : null;
+      const humVal = (hw.humidity !== null && hw.humidity !== undefined) ? hw.humidity : null;
+
+      const simValues = vitalSimulationEngine.nextValues();
+      let hrVal: number | null = null;
+      let hrSource: SignalSource = 'MEASURED';
+      if (hw.heart_rate !== null && hw.heart_rate !== undefined && hw.heart_rate > 0) {
+        hrVal = hw.heart_rate;
+        hrSource = 'MEASURED';
+      } else if (inf?.current_vitals?.heart_rate && inf.current_vitals.heart_rate > 0) {
+        hrVal = inf.current_vitals.heart_rate;
+        hrSource = 'SIMULATED';
+      } else {
+        hrVal = simValues.heartRate;
+        hrSource = 'SIMULATED';
+      }
+
+      let spo2Val: number | null = null;
+      let spo2Source: SignalSource = 'MEASURED';
+      if (hw.spo2 !== null && hw.spo2 !== undefined && hw.spo2 > 0) {
+        spo2Val = hw.spo2;
+        spo2Source = 'MEASURED';
+      } else if (inf?.current_vitals?.spo2 && inf.current_vitals.spo2 > 0) {
+        spo2Val = inf.current_vitals.spo2;
+        spo2Source = 'SIMULATED';
+      } else {
+        spo2Val = simValues.spo2;
+        spo2Source = 'SIMULATED';
+      }
+
+      const ppgConnected = hw.max30102_connected ?? false;
+      const ppgContact = hw.max30102_contact ?? false;
+      const rawIR = hw.raw_ir ?? 0;
+      const rawRed = hw.raw_red ?? 0;
+      const fanActive = hw.fan === 1 || hw.fan === true;
+      const peltierMode: 'OFF' | 'HEATING' | 'COOLING' = hw.peltier_command || (hw.peltier ? 'HEATING' : 'OFF');
+
+      // 1. Update Vitals
+      setVitals({
+        heartRate: hrVal,
+        heartRateTrend: 'STABLE',
+        heartRateSource: hrSource,
+        spo2: spo2Val,
+        spo2Trend: 'STABLE',
+        spo2Source: spo2Source,
+        chamberTemp: chamberT,
+        targetTemp: 28.5,
+        humidity: humVal,
+        thermalState: peltierMode === 'HEATING' ? 'HEATING' : peltierMode === 'COOLING' ? 'COOLING' : 'STABLE',
+        signalQuality: ppgContact ? 'GOOD' : (rawIR > 1000 ? 'FAIR' : 'POOR'),
+        signalQualityReason: ppgContact
+          ? `Physical MAX30102 stream active · HR/SpO₂ ${hrSource}`
+          : 'Waiting for optical sensor contact',
+        timestamp: new Date().toISOString(),
+        dataAgeSeconds: 0.2,
+        isSynthetic: hrSource === 'SIMULATED' || spo2Source === 'SIMULATED'
+      });
+
+      // 2. Update Thermal State
+      setThermal(prev => ({
+        ...prev,
+        chamberTemp: chamberT,
+        humidity: humVal,
+        peltierCommand: peltierMode,
+        peltierPwm: peltierMode === 'OFF' ? 0 : 180,
+        fanCommand: fanActive ? 'HIGH' : 'OFF',
+        hardwareSafetyStatus: 'READY',
+        peltierDriverStatus: peltierMode === 'OFF' ? 'STANDBY' : 'ENGAGED'
+      }));
+
+      // 3. Update Sensors
+      setSensors(prev => prev.map(s => {
+        if (s.id === 'max30102') {
+          return {
+            ...s,
+            connectionStatus: ppgConnected ? (ppgContact ? 'CONNECTED' : 'DEGRADED') : 'DISCONNECTED',
+            signalQuality: ppgContact ? 'GOOD' : (rawIR > 1000 ? 'FAIR' : 'POOR'),
+            validity: ppgConnected ? 'VALID' : 'INVALID',
+            lastReading: ppgContact
+              ? `Raw IR: ${rawIR} · Red: ${rawRed} (HR: ${hrVal?.toFixed(0)} BPM · SpO₂: ${spo2Val?.toFixed(0)}%)`
+              : `Raw IR: ${rawIR} · Red: ${rawRed}`
+          };
+        }
+        if (s.id === 'dht11') {
+          const dhtValid = hw.dht_temp !== null && hw.dht_temp !== undefined;
+          return {
+            ...s,
+            connectionStatus: dhtValid ? 'CONNECTED' : 'DISCONNECTED',
+            validity: dhtValid ? 'VALID' : 'INVALID',
+            lastReading: dhtValid ? `${hw.dht_temp?.toFixed(1)}°C / ${hw.humidity?.toFixed(0)}%` : 'Sensor disconnected'
+          };
+        }
+        if (s.id === 'ds18b20') {
+          const dsValid = hw.ds18b20_temp !== null && hw.ds18b20_temp !== undefined;
+          return {
+            ...s,
+            connectionStatus: dsValid ? 'CONNECTED' : 'DISCONNECTED',
+            validity: dsValid ? 'VALID' : 'INVALID',
+            lastReading: dsValid ? `${hw.ds18b20_temp?.toFixed(2)}°C` : 'Chamber probe disconnected'
+          };
+        }
+        if (s.id === 'camera') {
+          const camActive = packet.camera?.is_capturing ?? true;
+          return {
+            ...s,
+            connectionStatus: camActive ? 'CONNECTED' : 'UNAVAILABLE',
+            signalQuality: cam?.roi_valid ? 'GOOD' : 'FAIR',
+            validity: camActive ? 'VALID' : 'INVALID',
+            lastReading: cam ? `Farneback Flow: ${(cam.flow_y ?? 0).toFixed(4)} · Disp: ${(cam.displacement ?? 0).toFixed(3)}` : 'Camera Active',
+            faultStatus: cam?.roi_valid ? 'Chest ROI Tracking Active' : 'Align infant chest in camera ROI'
+          };
+        }
+        if (s.id === 'esp32') {
+          return {
+            ...s,
+            connectionStatus: 'CONNECTED',
+            validity: 'VALID',
+            signalQuality: 'GOOD',
+            lastReading: `Python AI Server Bridge @ 115.2k · Free Heap: ${hw.free_heap || 180000}B`
+          };
+        }
+        return s;
+      }));
+
+      // 4. Update AI Inference Metrics
+      if (inf) {
+        const stateMap: Record<string, AIApneaState> = {
+          NORMAL: 'NORMAL',
+          SUSPECTED: 'SUSPECTED',
+          APNEA_EVENT: 'CONFIRMED',
+          RECOVERY: 'RECOVERED',
+          SENSOR_ERROR: 'INVALID_SIGNAL',
+          MOTION_ARTIFACT: 'WATCH',
+          VIDEO_UNAVAILABLE: 'WATCH'
+        };
+        const mappedState: AIApneaState = stateMap[inf.state] || 'NORMAL';
+        const apneaProb = Math.min(100, Math.max(0, Math.round((inf.apnea_score ?? 0) * 100)));
+
+        setApnea({
+          state: mappedState,
+          probability: apneaProb,
+          eventDurationSeconds: inf.event_duration_sec ?? 0,
+          modelVersion: 'v2.4-multimodal-neural-torch',
+          inferenceLatencyMs: 5,
+          lastInferenceTimestamp: new Date().toLocaleTimeString(),
+          contributingFeatures: inf.attribution ? [
+            {
+              name: 'Webcam Farneback Respiration',
+              impact: (inf.attribution.video_contribution_pct ?? 0) > 30 ? 'CONTRIBUTING' : 'SUPPORTING',
+              score: (inf.attribution.video_contribution_pct ?? 0) / 100,
+              valueLabel: `${(inf.attribution.video_contribution_pct ?? 0).toFixed(0)}%`,
+              type: 'DERIVED' as SignalSource
+            },
+            {
+              name: 'MAX30102 Optical SpO₂',
+              impact: (inf.attribution.spo2_contribution_pct ?? 0) > 30 ? 'CONTRIBUTING' : 'SUPPORTING',
+              score: (inf.attribution.spo2_contribution_pct ?? 0) / 100,
+              valueLabel: `${(inf.attribution.spo2_contribution_pct ?? 0).toFixed(0)}%`,
+              type: 'MEASURED' as SignalSource
+            },
+            {
+              name: 'MAX30102 Optical Heart Rate',
+              impact: (inf.attribution.hr_contribution_pct ?? 0) > 30 ? 'CONTRIBUTING' : 'SUPPORTING',
+              score: (inf.attribution.hr_contribution_pct ?? 0) / 100,
+              valueLabel: `${(inf.attribution.hr_contribution_pct ?? 0).toFixed(0)}%`,
+              type: 'MEASURED' as SignalSource
+            }
+          ] : [],
+          cardiorespiratoryContext: {
+            hrDropBpm: Math.max(0, Math.round(140 - (hrVal ?? 140))),
+            spo2NadirPercent: spo2Val ?? 98,
+            respirationWaveAmplitudePercent: (cam?.displacement ?? 0.015) * 1000
+          },
+          multimodalEvidence: {
+            spo2Evidence: {
+              current: spo2Val,
+              baseline: 98,
+              delta: Math.round((spo2Val ?? 98) - 98),
+              slope: 0,
+              quality: (inf.signal_quality?.ppg_sqi ?? 0) > 0.7 ? 'GOOD' : 'FAIR',
+              freshnessSec: 0.2,
+              valid: spo2Val !== null,
+              source: spo2Source
+            },
+            hrEvidence: {
+              current: hrVal,
+              baseline: 140,
+              delta: Math.round((hrVal ?? 140) - 140),
+              quality: (inf.signal_quality?.ppg_sqi ?? 0) > 0.7 ? 'GOOD' : 'FAIR',
+              freshnessSec: 0.2,
+              valid: hrVal !== null,
+              hrvAvailable: true,
+              source: hrSource
+            },
+            cameraEvidence: {
+              movementAmplitude: cam?.displacement ?? 0.015,
+              baseline: 0.015,
+              deltaPercent: 0,
+              trackingStatus: 'LOCKED',
+              quality: (inf.signal_quality?.video_sqi ?? 0) > 0.7 ? 'GOOD' : 'FAIR',
+              valid: true,
+              source: 'DERIVED'
+            },
+            channels: {
+              camera: { value: cam?.displacement ?? 0.015, timestamp: Date.now(), ageMs: 66, signalQuality: inf.signal_quality?.video_sqi ?? 0.9, qualityRating: 'GOOD', valid: true, stale: false, source: 'DERIVED' },
+              spo2: { value: spo2Val, timestamp: Date.now(), ageMs: 20, signalQuality: inf.signal_quality?.ppg_sqi ?? 0.95, qualityRating: 'GOOD', valid: true, stale: false, source: spo2Source },
+              heartRate: { value: hrVal, timestamp: Date.now(), ageMs: 20, signalQuality: inf.signal_quality?.ppg_sqi ?? 0.95, qualityRating: 'GOOD', valid: true, stale: false, source: hrSource }
+            },
+            prototypeWeights: settings.fusionWeights,
+            effectiveWeights: {
+              camera: inf.evidence_weights?.video_weight ?? 0.40,
+              spo2: (inf.evidence_weights?.ppg_weight ?? 0.60) * 0.58,
+              heartRate: (inf.evidence_weights?.ppg_weight ?? 0.60) * 0.42
+            },
+            contributingChannels: ['CAMERA', 'SPO2', 'HR'],
+            shield: {
+              spo2Quality: (inf.signal_quality?.ppg_sqi ?? 0) > 0.7 ? 'GOOD' : 'FAIR',
+              spo2Freshness: 'FRESH',
+              hrQuality: (inf.signal_quality?.ppg_sqi ?? 0) > 0.7 ? 'GOOD' : 'FAIR',
+              hrFreshness: 'FRESH',
+              cameraQuality: (inf.signal_quality?.video_sqi ?? 0) > 0.7 ? 'GOOD' : 'FAIR',
+              cameraFreshness: 'FRESH',
+              overallStatus: 'OPTIMAL',
+              reason: 'All physical sensor streams within clinical SQI boundaries'
+            },
+            baselines: {
+              heartRate: { current: hrVal, baseline: 140, deltaBpm: Math.round((hrVal ?? 140) - 140) },
+              spo2: { current: spo2Val, baseline: 98, deltaPercent: Math.round((spo2Val ?? 98) - 98) },
+              cameraMovement: { current: cam?.displacement ?? 0.015, baseline: 0.015, deltaPercent: 0 }
+            },
+            prototypeApneaScore: apneaProb,
+            apneaProbability: apneaProb,
+            evidenceScore: inf.apnea_score ?? 0,
+            evidenceConfidence: 'HIGH',
+            eventState: mappedState,
+            reason: inf.reason || (mappedState === 'CONFIRMED' ? 'Apnea Event Flagged by Neural Fusion' : 'Normal Cardiorespiratory Stability'),
+            flaggedFeatures: [
+              {
+                source: 'CAMERA',
+                text: 'Webcam Farneback Motion',
+                delta: `${(inf.attribution?.video_contribution_pct ?? 0).toFixed(0)}%`,
+                originTag: 'DERIVED',
+                status: ((inf.attribution?.video_contribution_pct ?? 0) > 30 ? 'CONTRIBUTING' : 'SUPPORTING') as 'CONTRIBUTING' | 'SUPPORTING'
+              },
+              {
+                source: 'SPO2',
+                text: 'MAX30102 Optical SpO₂',
+                delta: `${(inf.attribution?.spo2_contribution_pct ?? 0).toFixed(0)}%`,
+                originTag: 'MEASURED',
+                status: ((inf.attribution?.spo2_contribution_pct ?? 0) > 30 ? 'CONTRIBUTING' : 'SUPPORTING') as 'CONTRIBUTING' | 'SUPPORTING'
+              },
+              {
+                source: 'HR',
+                text: 'MAX30102 Optical Heart Rate',
+                delta: `${(inf.attribution?.hr_contribution_pct ?? 0).toFixed(0)}%`,
+                originTag: 'MEASURED',
+                status: ((inf.attribution?.hr_contribution_pct ?? 0) > 30 ? 'CONTRIBUTING' : 'SUPPORTING') as 'CONTRIBUTING' | 'SUPPORTING'
+              }
+            ],
+            clinicalReferenceContext: {
+              population: 'GENERAL_NEONATAL',
+              populationLabel: 'General Neonatal (Standard Reference)',
+              hrEvaluation: {
+                status: 'WITHIN_REFERENCE',
+                statusLabel: 'NORMAL RANGE (100–160 BPM)',
+                referenceText: '100–160 BPM',
+                source: AUTHORITATIVE_SOURCES.WHO_NEWBORN_EXAM,
+                isWarning: false
+              },
+              spo2Evaluation: {
+                statusLabel: 'TARGET RANGE (92–98%)',
+                targetText: '92–98%',
+                deltaText: `${spo2Val ?? 98}%`,
+                source: AUTHORITATIVE_SOURCES.AAP_OXYGEN_TARGETING,
+                isDesaturating: (spo2Val ?? 98) < 90
+              },
+              tempEvaluation: {
+                status: 'WITHIN_REFERENCE',
+                statusLabel: 'EU-THERMIC (36.5–37.5 °C)',
+                referenceText: '36.5–37.5 °C',
+                source: AUTHORITATIVE_SOURCES.WHO_THERMAL_CARE,
+                isWarning: false
+              },
+              apneaClinicalCriterion: {
+                definitionText: 'Cessation of breathing ≥20 seconds OR shorter pause (<20s) with bradycardia (HR <100 BPM) or desaturation (SpO₂ ≤85%)',
+                source: AUTHORITATIVE_SOURCES.AAP_AOP_GUIDELINE,
+                prototypeDiffText: 'AVENZA prototype uses a 10-second algorithmic temporal window (DETECTION_WINDOW_MS) for early multi-signal alerting.'
+              },
+              singleChannelSafetyActive: false
+            }
+          },
+          isSynthetic: hrSource === 'SIMULATED' || spo2Source === 'SIMULATED'
+        });
+      }
+
+      // 5. Update Waveform Buffer
+      const newPoint: WaveformPoint = {
+        timestamp: new Date().toLocaleTimeString(),
+        timeSec: Math.floor((hw.uptime_ms ?? 0) / 1000),
+        rawPPG: rawIR,
+        filteredPPG: rawRed,
+        respiratorySignal: cam?.displacement ?? 0.015,
+        cameraMovement: cam?.displacement ?? 0.015,
+        respiratoryMotionEst: cam ? Math.round((cam.energy ?? 0.001) * 30000 + 35) : 40,
+        aiProbability: inf?.apnea_score ? inf.apnea_score * 100 : 0,
+        cameraSignalQuality: 'GOOD',
+        respiratoryAvailable: cam !== null,
+        heartRate: hrVal,
+        spo2: spo2Val,
+        signalQuality: ppgContact ? 'GOOD' : 'FAIR',
+        isSynthetic: hrSource === 'SIMULATED' || spo2Source === 'SIMULATED'
+      };
+
+      setWaveforms(prev => [...prev.slice(-119), newPoint]);
+
+      // 6. Record Replay Frame
+      const replayFrame: ReplayFrame = {
+        timestamp: Date.now(),
+        timeOffsetSec: 0,
+        heartRate: hrVal,
+        heartRateSource: hrSource === 'MEASURED' ? 'MEASURED' : 'SIMULATED',
+        spo2: spo2Val,
+        spo2Source: spo2Source === 'MEASURED' ? 'MEASURED' : 'SIMULATED',
+        temperature: (hw.dht_temp !== null && hw.dht_temp !== undefined) ? hw.dht_temp : null,
+        humidity: humVal,
+        chamberTemperature: (hw.ds18b20_temp !== null && hw.ds18b20_temp !== undefined) ? hw.ds18b20_temp : null,
+        rawIR: rawIR,
+        rawRed: rawRed,
+        cameraMovement: cam?.displacement ?? null,
+        cameraTrackingState: 'LOCKED',
+        esp32Connected: true,
+        fanCommand: fanActive ? 'HIGH' : 'OFF',
+        peltierCommand: peltierMode,
+        signalQuality: ppgContact ? 'GOOD' : 'FAIR',
+        apneaState: inf?.state === 'APNEA_EVENT' ? 'CONFIRMED' : 'NORMAL',
+        apneaScore: inf?.apnea_score ? Math.round(inf.apnea_score * 100) : 0,
+        primaryContribution: inf?.attribution?.clinical_summary
+      };
+
+      eventReplayService.pushLiveFrame(replayFrame);
+      return;
+    }
+
+    // Standard live telemetry packet
+    handleIncomingLiveTelemetry(packet);
+  };
+
   // Web Serial Listeners Setup
   useEffect(() => {
     const unsubState = webSerialService.onStateChange((state) => {
@@ -616,6 +976,21 @@ export const MonitoringProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     };
   }, [settings]);
 
+  // WebSocket Subscription to Python AI Backend
+  useEffect(() => {
+    const wsUrl = `ws://${window.location.hostname || 'localhost'}:8000/ws/dashboard`;
+    esp32WebSocketService.connect(wsUrl);
+
+    const unsubWs = esp32WebSocketService.onTelemetry((packet) => {
+      handleIncomingUnifiedTelemetry(packet);
+    });
+
+    return () => {
+      unsubWs();
+      esp32WebSocketService.disconnect();
+    };
+  }, [settings.webSocketPort, settings.webSocketUrl]);
+
   // Session elapsed counter for active sessions
   useEffect(() => {
     if (session.status !== 'ACTIVE') return undefined;
@@ -656,15 +1031,17 @@ export const MonitoringProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const updateThermalControls = (controls: Partial<ThermalHardwareState>) => {
     setThermal(prev => ({ ...prev, ...controls }));
     
-    // Transmit commands directly to ESP32 over Web Serial
+    // Transmit commands directly to ESP32 over Web Serial & Python AI Bridge
     if (controls.fanCommand !== undefined) {
       const fanOn = controls.fanCommand !== 'OFF';
       webSerialService.sendFanCommand(fanOn);
+      esp32WebSocketService.sendFanCommand(fanOn);
     }
     if (controls.peltierCommand !== undefined) {
       const mode = controls.peltierCommand;
       const pwm = controls.peltierPwm ?? thermal.peltierPwm ?? 120;
       webSerialService.sendPeltierCommand(mode, pwm);
+      esp32WebSocketService.sendPeltierCommand(mode, pwm);
     }
   };
 

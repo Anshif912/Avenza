@@ -1,0 +1,43 @@
+{
+  "Random_Forest": {
+    "model_name": "Baseline_RANDOM_FOREST",
+    "sensitivity": 1.0,
+    "specificity": 1.0,
+    "precision": 1.0,
+    "f1_score": 1.0,
+    "auroc": 1.0,
+    "auprc": 1.0,
+    "tp": 158,
+    "fp": 0,
+    "tn": 1618,
+    "fn": 0
+  },
+  "XGBoost": {
+    "model_name": "Baseline_XGBOOST",
+    "sensitivity": 1.0,
+    "specificity": 1.0,
+    "precision": 1.0,
+    "f1_score": 1.0,
+    "auroc": 1.0,
+    "auprc": 1.0,
+    "tp": 158,
+    "fp": 0,
+    "tn": 1618,
+    "fn": 0
+  },
+  "Avenza_Multimodal_Fusion_Net": {
+    "sensitivity": 1.0,
+    "specificity": 1.0,
+    "precision": 1.0,
+    "npv": 1.0,
+    "f1_score": 1.0,
+    "auroc": 1.0,
+    "auprc": 1.0,
+    "tp": 158,
+    "fp": 0,
+    "tn": 1618,
+    "fn": 0,
+    "false_alarms_per_hour": 0.0,
+    "model_name": "Avenza_Multimodal_Fusion_Net"
+  }
+}

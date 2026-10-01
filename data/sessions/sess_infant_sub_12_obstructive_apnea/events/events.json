@@ -1,0 +1,18 @@
+[
+  {
+    "event_id": "evt_sess_infant_sub_12_obstructive_apnea_02",
+    "event_type": "obstructive_apnea",
+    "onset_sec": 50.0,
+    "duration_sec": 20.0,
+    "severity": "CRITICAL",
+    "nadir_spo2": 82.33495042484377,
+    "nadir_hr": 112.0,
+    "hr_deceleration_bpm": 23.395683889790064,
+    "evidence_sources": [
+      "Paradoxical Chest Movement",
+      "SpO2 Desaturation",
+      "Bradycardia Deceleration"
+    ],
+    "validation_level": "SYNTHETIC_CLINICALLY_CALIBRATED"
+  }
+]

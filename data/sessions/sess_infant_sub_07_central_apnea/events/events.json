@@ -1,0 +1,18 @@
+[
+  {
+    "event_id": "evt_sess_infant_sub_07_central_apnea_01",
+    "event_type": "central_apnea",
+    "onset_sec": 45.0,
+    "duration_sec": 22.0,
+    "severity": "CRITICAL",
+    "nadir_spo2": 81.17695957136394,
+    "nadir_hr": 111.51507265138375,
+    "hr_deceleration_bpm": 28.0,
+    "evidence_sources": [
+      "Camera Chest Stillness",
+      "SpO2 Desaturation (>=3%)",
+      "Bradycardia Deceleration (>=15 BPM)"
+    ],
+    "validation_level": "SYNTHETIC_CLINICALLY_CALIBRATED"
+  }
+]

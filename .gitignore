@@ -58,3 +58,20 @@ firmware/**/.arduino/
 *.hex
 *.bin
 *.elf
+
+# ------------------------------------------------------------------------------
+# 9. Python Bytecode, Virtual Environments & Caches
+# ------------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+ENV/
+.pytest_cache/
+.coverage
+htmlcov/
+

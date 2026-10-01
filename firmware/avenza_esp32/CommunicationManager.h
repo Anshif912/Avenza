@@ -9,11 +9,11 @@
 #include "HealthManager.h"
 
 /* ============================================================
-   COMMUNICATION MANAGER (USB WEB SERIAL & JSON TELEMETRY)
-   - 115,200 baud USB Serial Protocol
-   - 5 Hz Non-blocking JSON-lines Telemetry Stream
-   - Strict schema validation & Null representation for invalid sensors
-   - Bi-directional JSON Serial command parser
+   COMMUNICATION MANAGER (USB SERIAL PROTOCOL)
+   - 115,200 baud USB Serial
+   - Non-blocking JSON-lines Telemetry Stream
+   - Dual-format JSON (Flat + Nested for backend and frontend)
+   - Bi-directional Command Parsing
    ============================================================ */
 
 class CommunicationManager {
@@ -31,15 +31,13 @@ public:
 
   void begin(ActuatorManager* actuators) {
     pActuators = actuators;
-    
-    // Send Startup Health Packet
     sendHealthPacket(true);
   }
 
   void update(MAX30102Manager& ppg, TemperatureManager& temp, ActuatorManager& act, HealthManager& health) {
     uint32_t now = millis();
 
-    // 1. Periodic Telemetry Stream (5 Hz / 200 ms)
+    // Periodic Telemetry Stream (5 Hz / 200 ms)
     if (now - lastTelemetryMs >= TELEMETRY_INTERVAL_MS) {
       lastTelemetryMs = now;
       String telemetryJson = buildTelemetryJson(ppg, temp, act, health);
@@ -47,7 +45,7 @@ public:
       packetsSent++;
     }
 
-    // 2. Periodic Health Heartbeat (5000 ms)
+    // Periodic Health Heartbeat (5000 ms)
     if (now - lastHealthMs >= HEALTH_INTERVAL_MS) {
       lastHealthMs = now;
       sendHealthPacket(ppg.connected, temp.dhtConnected, temp.ds18b20Connected);
@@ -57,14 +55,14 @@ public:
   void sendHealthPacket(bool maxOk = true, bool dhtOk = true, bool dsOk = true) {
     String json = "{";
     json += "\"type\":\"health\",";
+    json += "\"device\":\"" + String(AVENZA_DEVICE_ID) + "\",";
     json += "\"deviceId\":\"" + String(AVENZA_DEVICE_ID) + "\",";
     json += "\"firmware\":\"" + String(AVENZA_FIRMWARE_VERSION) + "\",";
     json += "\"uptimeMs\":" + String(millis()) + ",";
     json += "\"sensors\":{";
     json += "\"max30102\":" + String(maxOk ? "true" : "false") + ",";
     json += "\"dht11\":" + String(dhtOk ? "true" : "false") + ",";
-    json += "\"ds18b20\":" + String(dsOk ? "true" : "false") + ",";
-    json += "\"oled\":true";
+    json += "\"ds18b20\":" + String(dsOk ? "true" : "false");
     json += "},";
     json += "\"system\":{";
     json += "\"freeHeap\":" + String(ESP.getFreeHeap()) + ",";
@@ -77,12 +75,37 @@ public:
   String buildTelemetryJson(MAX30102Manager& ppg, TemperatureManager& temp, ActuatorManager& act, HealthManager& health) {
     String json = "{";
     json += "\"type\":\"telemetry\",";
+    json += "\"device\":\"" + String(AVENZA_DEVICE_ID) + "\",";
     json += "\"deviceId\":\"" + String(AVENZA_DEVICE_ID) + "\",";
     json += "\"firmware\":\"" + String(AVENZA_FIRMWARE_VERSION) + "\",";
     json += "\"timestamp\":" + String(millis()) + ",";
     json += "\"uptimeMs\":" + String(health.getUptimeMs()) + ",";
 
-    // Sensors Object
+    // --- Flat Telemetry Fields ---
+    if (temp.ds18b20Valid && temp.chamberTemperature > -50.0f) {
+      json += "\"ds18b20_temp\":" + String(temp.chamberTemperature, 2) + ",";
+    } else {
+      json += "\"ds18b20_temp\":null,";
+    }
+
+    if (temp.dhtValid && temp.dhtTemperature > 0.0f) {
+      json += "\"dht_temp\":" + String(temp.dhtTemperature, 1) + ",";
+      json += "\"humidity\":" + String(temp.dhtHumidity, 1) + ",";
+    } else {
+      json += "\"dht_temp\":null,";
+      json += "\"humidity\":null,";
+    }
+
+    json += "\"fan\":" + String(act.fanCommand ? 1 : 0) + ",";
+    json += "\"peltier\":" + String(act.peltierCommand == PELTIER_HEATING ? 1 : (act.peltierCommand == PELTIER_COOLING ? 2 : 0)) + ",";
+    json += "\"red\":" + String(act.ledRed ? 1 : 0) + ",";
+    json += "\"yellow\":" + String(act.ledYellow ? 1 : 0) + ",";
+    json += "\"green\":" + String(act.ledGreen ? 1 : 0) + ",";
+    json += "\"max30102\":" + String(ppg.connected ? (ppg.contactDetected ? 1 : 0) : 0) + ",";
+    json += "\"raw_red\":" + String(ppg.rawRed) + ",";
+    json += "\"raw_ir\":" + String(ppg.rawIR) + ",";
+
+    // --- Nested Sensors Object (Frontend & AI pipeline integration) ---
     json += "\"sensors\":{";
     
     // MAX30102
@@ -98,7 +121,6 @@ public:
       json += "\"heartRateValid\":false,";
       json += "\"heartRateQuality\":0.0,";
     }
-    // SpO2 is explicitly null until clinically validated
     if (ppg.spo2Valid && ppg.spo2 > 0) {
       json += "\"spo2\":" + String(ppg.spo2, 1) + ",";
       json += "\"spo2Valid\":true,";
@@ -147,12 +169,12 @@ public:
     json += "\"peltierCommand\":\"" + String(act.getPeltierCommandString()) + "\",";
     json += "\"peltierPwm\":" + String(act.peltierPwm) + ",";
     json += "\"safetyCutoff\":" + String(act.safetyCutoffActive ? "true" : "false") + ",";
+    json += "\"manualOverride\":" + String(act.manualOverrideActive ? "true" : "false") + ",";
     json += "\"driverStatus\":\"" + act.driverStatus + "\"";
     json += "},";
 
     // System Object
     json += "\"system\":{";
-    json += "\"wifiConnected\":false,";
     json += "\"freeHeap\":" + String(health.getFreeHeap()) + ",";
     json += "\"baud\":" + String(SERIAL_BAUD_RATE);
     json += "}";
@@ -164,36 +186,46 @@ public:
   void parseAndExecuteCommand(const String& payload) {
     if (!pActuators) return;
 
-    // Structured JSON command parser
     // 1. Fan Command
     if (payload.indexOf("\"target\":\"fan\"") >= 0 || payload.indexOf("\"target\": \"fan\"") >= 0) {
-      if (payload.indexOf("\"action\":\"ON\"") >= 0 || payload.indexOf("\"value\":true") >= 0 || payload.indexOf("\"value\": true") >= 0) {
+      pActuators->manualOverrideActive = true;
+      if (payload.indexOf("\"action\":\"ON\"") >= 0 || payload.indexOf("\"value\":true") >= 0 || payload.indexOf("\"value\": true") >= 0 || payload.indexOf("\"value\":1") >= 0) {
         pActuators->setFan(true);
-      } else if (payload.indexOf("\"action\":\"OFF\"") >= 0 || payload.indexOf("\"value\":false") >= 0 || payload.indexOf("\"value\": false") >= 0) {
+      } else if (payload.indexOf("\"action\":\"OFF\"") >= 0 || payload.indexOf("\"value\":false") >= 0 || payload.indexOf("\"value\": false") >= 0 || payload.indexOf("\"value\":0") >= 0) {
         pActuators->setFan(false);
       }
     }
 
     // 2. Peltier Command
     if (payload.indexOf("\"target\":\"peltier\"") >= 0 || payload.indexOf("\"target\": \"peltier\"") >= 0) {
-      if (payload.indexOf("\"action\":\"OFF\"") >= 0 || payload.indexOf("\"mode\":\"OFF\"") >= 0) {
+      pActuators->manualOverrideActive = true;
+      if (payload.indexOf("\"action\":\"OFF\"") >= 0 || payload.indexOf("\"mode\":\"OFF\"") >= 0 || payload.indexOf("\"value\":0") >= 0) {
         pActuators->setPeltier(PELTIER_OFF, 0);
       } else {
         PeltierMode mode = PELTIER_OFF;
-        if (payload.indexOf("HEATING") >= 0) mode = PELTIER_HEATING;
-        else if (payload.indexOf("COOLING") >= 0) mode = PELTIER_COOLING;
+        if (payload.indexOf("HEATING") >= 0 || payload.indexOf("\"value\":1") >= 0) mode = PELTIER_HEATING;
+        else if (payload.indexOf("COOLING") >= 0 || payload.indexOf("\"value\":2") >= 0) mode = PELTIER_COOLING;
         
-        uint8_t pwm = 120; // Default nominal conservative PWM
+        uint8_t pwm = 180;
         int pwmIdx = payload.indexOf("\"pwm\":");
         if (pwmIdx >= 0) {
           pwm = payload.substring(pwmIdx + 6).toInt();
-        } else {
-          int valIdx = payload.indexOf("\"value\":");
-          if (valIdx >= 0) pwm = payload.substring(valIdx + 8).toInt();
         }
-
         pActuators->setPeltier(mode, pwm);
       }
+    }
+
+    // 3. Resume Autonomous Mode
+    if (payload.indexOf("\"target\":\"auto\"") >= 0 || payload.indexOf("\"target\": \"auto\"") >= 0) {
+      pActuators->manualOverrideActive = false;
+    }
+
+    // 4. Manual LED Command
+    if (payload.indexOf("\"target\":\"led\"") >= 0 || payload.indexOf("\"target\": \"led\"") >= 0) {
+      bool r = payload.indexOf("\"red\":1") >= 0 || payload.indexOf("\"red\": 1") >= 0;
+      bool y = payload.indexOf("\"yellow\":1") >= 0 || payload.indexOf("\"yellow\": 1") >= 0;
+      bool g = payload.indexOf("\"green\":1") >= 0 || payload.indexOf("\"green\": 1") >= 0;
+      pActuators->setLeds(r, y, g);
     }
   }
 };

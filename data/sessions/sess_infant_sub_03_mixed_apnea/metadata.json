@@ -1,0 +1,13 @@
+{
+  "session_id": "sess_infant_sub_03_mixed_apnea",
+  "subject_id": "infant_sub_03",
+  "scenario": "mixed_apnea",
+  "gestational_age_weeks": 32.5,
+  "birth_weight_grams": 1640,
+  "duration_sec": 120,
+  "ppg_fs": 50,
+  "video_fs": 15,
+  "chamber_temp_c": 36.8,
+  "created_at": "2026-09-27T20:05:00.888068Z",
+  "prototype_disclaimer": "SYNTHETIC / CALIBRATED PROTOTYPE DATASET \u2014 NOT CLINICAL DIAGNOSIS"
+}

@@ -156,9 +156,17 @@ public:
   }
 
   float getBestTemperature() const {
-    if (ds18b20Valid) return chamberTemperature;
-    if (dhtValid) return dhtTemperature;
+    if (ds18b20Valid && chamberTemperature > -50.0f) return chamberTemperature;
+    if (dhtValid && dhtTemperature > 0.0f) return dhtTemperature;
     return -999.0f;
+  }
+
+  bool isAnyTempValid() const {
+    return (ds18b20Valid && chamberTemperature > -50.0f) || (dhtValid && dhtTemperature > 0.0f);
+  }
+
+  bool isDS18B20Valid() const {
+    return (ds18b20Valid && chamberTemperature > -50.0f);
   }
 };
 

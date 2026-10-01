@@ -1,12 +1,12 @@
 import { SignalQuality } from '../types/avenza';
 
 export interface ESP32TelemetryPacket {
-  type: 'telemetry' | 'health' | 'heartbeat';
-  deviceId: string;
-  firmware: string;
+  type: 'telemetry' | 'health' | 'heartbeat' | 'unified_telemetry';
+  deviceId?: string;
+  firmware?: string;
   timestamp: number;
-  uptimeMs: number;
-  sensors: {
+  uptimeMs?: number;
+  sensors?: {
     max30102: {
       connected: boolean;
       contact: boolean;
@@ -15,7 +15,7 @@ export interface ESP32TelemetryPacket {
       heartRateQuality: number;
       spo2: number | null;
       spo2Valid: boolean;
-      spo2Quality: number;
+      spo2Quality: number | null;
       ir: number;
       red: number;
       qualityRating: SignalQuality;
@@ -32,19 +32,50 @@ export interface ESP32TelemetryPacket {
       valid: boolean;
     };
   };
-  actuators: {
+  actuators?: {
     fanCommand: boolean;
     peltierCommand: 'OFF' | 'HEATING' | 'COOLING';
     peltierPwm: number;
     safetyCutoff: boolean;
     driverStatus: string;
   };
-  system: {
-    wifiConnected: boolean;
-    wifiRssi: number;
-    ipAddress?: string;
-    freeHeap: number;
-    wsClients: number;
+  system?: {
+    freeHeap?: number;
+    baud?: number;
+  };
+  // Optional AI inference fields if streamed from unified backend
+  hardware?: any;
+  camera?: any;
+  inference?: {
+    status: string;
+    state: string;
+    apnea_score: number;
+    is_alert: boolean;
+    event_type: string;
+    event_duration_sec: number;
+    current_vitals: {
+      heart_rate: number;
+      spo2: number;
+      perfusion_index: number;
+    };
+    signal_quality: {
+      ppg_sqi: number;
+      video_sqi: number;
+      is_ppg_valid: boolean;
+      is_video_valid: boolean;
+    };
+    evidence_weights: {
+      video_weight: number;
+      ppg_weight: number;
+    };
+    attribution: {
+      video_contribution_pct: number;
+      spo2_contribution_pct: number;
+      hr_contribution_pct: number;
+      clinical_summary: string;
+    };
+    reason: string;
+    prototype_disclaimer: string;
   };
 }
 
@@ -52,7 +83,7 @@ export type ConnectionState = 'DISCONNECTED' | 'CONNECTING' | 'CONNECTED' | 'REC
 
 export class ESP32WebSocketService {
   private ws: WebSocket | null = null;
-  private url: string = 'ws://192.168.1.120:8080';
+  private url: string = 'ws://localhost:8000/ws/dashboard';
   private connectionState: ConnectionState = 'DISCONNECTED';
   private reconnectTimer: any = null;
   private reconnectAttempts: number = 0;
@@ -68,7 +99,7 @@ export class ESP32WebSocketService {
   public setUrl(url: string, port?: number) {
     if (port && !url.includes(`:${port}`)) {
       const cleanUrl = url.replace(/\/+$/, '');
-      this.url = `${cleanUrl}:${port}`;
+      this.url = `${cleanUrl}:${port}/ws/dashboard`;
     } else {
       this.url = url;
     }
@@ -89,12 +120,13 @@ export class ESP32WebSocketService {
       this.ws.onopen = () => {
         this.reconnectAttempts = 0;
         this.updateState('CONNECTED');
+        console.log(`[AVENZA-WS] Connected to AI Backend & Telemetry Stream at ${this.url}`);
       };
 
       this.ws.onmessage = (event) => {
         try {
           const packet = JSON.parse(event.data) as ESP32TelemetryPacket;
-          if (packet.type === 'telemetry') {
+          if (packet.type === 'telemetry' || packet.type === 'unified_telemetry') {
             this.telemetryListeners.forEach(listener => listener(packet));
           }
         } catch (e) {
@@ -102,7 +134,7 @@ export class ESP32WebSocketService {
         }
       };
 
-      this.ws.onerror = (err) => {
+      this.ws.onerror = () => {
         this.updateState('ERROR');
       };
 
@@ -136,18 +168,25 @@ export class ESP32WebSocketService {
 
   public sendFanCommand(on: boolean) {
     this.sendJson({
-      type: 'command',
+      action: 'fan',
       target: 'fan',
       value: on
     });
   }
 
-  public sendPeltierCommand(mode: 'OFF' | 'HEATING' | 'COOLING', pwm: number = 120) {
+  public sendPeltierCommand(mode: 'OFF' | 'HEATING' | 'COOLING', pwm: number = 180) {
     this.sendJson({
-      type: 'command',
+      action: 'peltier',
       target: 'peltier',
       mode,
       pwm
+    });
+  }
+
+  public sendAutoCommand() {
+    this.sendJson({
+      action: 'auto',
+      target: 'auto'
     });
   }
 
@@ -186,7 +225,7 @@ export class ESP32WebSocketService {
   private scheduleReconnect() {
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     this.reconnectAttempts++;
-    const delay = Math.min(1000 * Math.pow(1.5, this.reconnectAttempts), 15000);
+    const delay = Math.min(1000 * Math.pow(1.5, this.reconnectAttempts), 10000);
     this.reconnectTimer = setTimeout(() => {
       if (this.autoReconnect) {
         this.connect();
