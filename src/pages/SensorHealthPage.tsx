@@ -1,21 +1,19 @@
 import React from 'react';
 import { useMonitoring } from '../context/MonitoringContext';
-import { Cpu, Activity, Thermometer, Camera, ShieldCheck, Fan, Zap } from 'lucide-react';
-import { SectionHeader, SensorHealthRow, ClinicalDisclaimer } from '../components/design-system/DesignSystemComponents';
+import { Cpu, Activity, Thermometer, Camera, ShieldCheck, Fan, Zap, Radio } from 'lucide-react';
+import { SectionHeader } from '../components/design-system/DesignSystemComponents';
 import { ESP32ConnectionPanel } from '../components/common/ESP32ConnectionPanel';
 
 export const SensorHealthPage: React.FC = () => {
   const { sensors, thermal, serialStatus } = useMonitoring();
 
-  // Find sensors
   const ppgSensor = sensors.find(s => s.id === 'max30102') || sensors[0];
   const dhtSensor = sensors.find(s => s.id === 'dht11');
   const dsSensor = sensors.find(s => s.id === 'ds18b20' || s.id === 'mlx90614') || sensors[1];
   const cameraSensor = sensors.find(s => s.id === 'camera') || sensors[2];
 
-  const mapStatus = (status?: string): 'ONLINE' | 'DEGRADED' | 'OFFLINE' | 'STANDBY' | 'WAITING' | 'UNAVAILABLE' => {
+  const mapStatus = (status?: string): 'ONLINE' | 'DEGRADED' | 'OFFLINE' | 'STANDBY' | 'WAITING' => {
     if (!status || status === 'WAITING') return 'WAITING';
-    if (status === 'UNAVAILABLE') return 'UNAVAILABLE';
     if (status === 'CONNECTED') return 'ONLINE';
     if (status === 'DEGRADED') return 'DEGRADED';
     if (status === 'DISCONNECTED') return 'OFFLINE';
@@ -25,138 +23,225 @@ export const SensorHealthPage: React.FC = () => {
   const isConnected = (status?: string) => status === 'CONNECTED';
   const isSerialActive = serialStatus === 'CONNECTED';
 
-  const clinicalSensors = [
+  const sensorMatrix = [
     {
-      name: 'MAX30102 Optical PPG & Pulse Rate',
-      protocol: 'I²C (0x57) · High-Rate Optical FIFO · SpO₂ Uncalibrated',
+      name: 'MAX30102 Optical Sensor',
+      type: 'PPG & SpO₂ Telemetry',
+      pin: 'GPIO 32 (SDA), GPIO 33 (SCL)',
+      protocol: ppgSensor?.lastReading ? `Reading: ${ppgSensor.lastReading}` : 'I²C (0x57) · Fast Mode',
+      rate: ppgSensor?.bpmCandidate ? `Cand: ${ppgSensor.bpmCandidate.toFixed(0)} BPM / ${ppgSensor.spo2Candidate ? ppgSensor.spo2Candidate.toFixed(0) + '%' : 'Est'}` : '100 Hz Sample',
       status: mapStatus(ppgSensor?.connectionStatus),
-      latencyMs: isConnected(ppgSensor?.connectionStatus) ? 14 : undefined,
-      healthPct: isConnected(ppgSensor?.connectionStatus) ? (ppgSensor?.signalQuality === 'GOOD' ? 98 : ppgSensor?.signalQuality === 'FAIR' ? 76 : 35) : 0,
+      latency: isConnected(ppgSensor?.connectionStatus) ? '12ms' : '—',
+      health: isConnected(ppgSensor?.connectionStatus) ? (ppgSensor?.validity === 'VALID' ? '100%' : ppgSensor?.signalQuality === 'GOOD' ? '85%' : '60%') : '0%',
       icon: Activity,
+      color: 'text-rose-600',
     },
     {
-      name: 'DS18B20 Incubator Chamber Temperature Probe',
-      protocol: '1-Wire (GPIO 5) · Non-blocking async conversion · 1000ms',
+      name: 'DS18B20 Digital Thermometer',
+      type: 'Chamber Temperature Probe',
+      pin: 'GPIO 4 · Dallas 1-Wire Bus',
+      protocol: '1-Wire · 12-bit Resolution (4.7kΩ pull-up)',
+      rate: '1 Hz',
       status: mapStatus(dsSensor?.connectionStatus),
-      latencyMs: isConnected(dsSensor?.connectionStatus) ? 18 : undefined,
-      healthPct: isConnected(dsSensor?.connectionStatus) ? 99 : 0,
+      latency: isConnected(dsSensor?.connectionStatus) ? '18ms' : '—',
+      health: isConnected(dsSensor?.connectionStatus) ? '100%' : '0%',
       icon: Thermometer,
+      color: 'text-amber-600',
     },
     {
-      name: 'DHT11 Ambient Temperature & Humidity Sensor',
-      protocol: 'Single-Bus (GPIO 4) · 2000ms sampling cycle',
+      name: 'DHT11 Environmental Sensor',
+      type: 'Relative Humidity & Ambient Temp',
+      pin: 'GPIO 5 · Single-Wire GPIO',
+      protocol: 'Custom Digital Single-Wire',
+      rate: '1 Hz',
       status: mapStatus(dhtSensor?.connectionStatus),
-      latencyMs: isConnected(dhtSensor?.connectionStatus) ? 20 : undefined,
-      healthPct: isConnected(dhtSensor?.connectionStatus) ? 95 : 0,
+      latency: isConnected(dhtSensor?.connectionStatus) ? '22ms' : '—',
+      health: isConnected(dhtSensor?.connectionStatus) ? '100%' : '0%',
       icon: Thermometer,
+      color: 'text-teal-600',
     },
     {
-      name: 'Laptop Webcam (Thoracic Motion ROI)',
-      protocol: 'Browser getUserMedia · 15 FPS Optical Motion Pipeline',
+      name: 'Laptop Webcam Flow Pipeline',
+      type: 'Non-contact Thoracic Movement',
+      pin: 'Browser getUserMedia Web API',
+      protocol: 'Client-side Optical Flow',
+      rate: '15 FPS',
       status: mapStatus(cameraSensor?.connectionStatus),
-      latencyMs: isConnected(cameraSensor?.connectionStatus) ? 16 : undefined,
-      healthPct: isConnected(cameraSensor?.connectionStatus) ? 92 : 0,
+      latency: isConnected(cameraSensor?.connectionStatus) ? '16ms' : '—',
+      health: isConnected(cameraSensor?.connectionStatus) ? '95%' : '0%',
       icon: Camera,
+      color: 'text-violet-600',
     },
   ];
 
-  const hardwareActuators = [
+  const actuatorMatrix = [
     {
-      name: 'ESP32 Dual-Core MCU (USB Web Serial)',
-      protocol: 'Firmware v1.0.0 · 115,200 Baud JSON-lines',
-      status: (serialStatus === 'CONNECTED' ? 'ONLINE' : serialStatus === 'CONNECTING' ? 'DEGRADED' : 'WAITING') as 'ONLINE' | 'DEGRADED' | 'WAITING',
-      latencyMs: isSerialActive ? 4 : undefined,
-      healthPct: isSerialActive ? 100 : 0,
+      name: 'ESP32-WROOM-32 Controller',
+      type: 'Core Microcontroller Unit',
+      pin: 'USB Serial (115,200 Baud)',
+      protocol: 'Line-delimited JSON Stream',
+      rate: '1 Hz Telemetry Stream',
+      status: isSerialActive ? 'ONLINE' : serialStatus === 'CONNECTING' ? 'DEGRADED' : 'WAITING',
+      latency: isSerialActive ? '4ms' : '—',
+      health: isSerialActive ? '100%' : '0%',
       icon: Cpu,
+      color: 'text-blue-600',
     },
     {
-      name: 'L298N Dual H-Bridge Driver (TEC1-12706 Peltier)',
-      protocol: `PWM Output (GPIO 25, 26, 27) · State: ${thermal.peltierCommand}`,
-      status: (thermal.peltierCommand === 'OFF' ? 'STANDBY' : isSerialActive ? 'ONLINE' : 'STANDBY') as 'ONLINE' | 'STANDBY',
-      latencyMs: isSerialActive ? 2 : undefined,
-      healthPct: isSerialActive ? 96 : 0,
+      name: 'Thermal Actuator Stage',
+      type: 'Micro-climate Peltier Driver',
+      pin: 'GPIO 25 · Direction / Gate',
+      protocol: `State: ${thermal.peltierCommand} · PWM: ${thermal.peltierPwm}`,
+      rate: 'Thermal Relay / PWM',
+      status: thermal.peltierCommand === 'OFF' ? 'STANDBY' : isSerialActive ? 'ONLINE' : 'STANDBY',
+      latency: isSerialActive ? '2ms' : '—',
+      health: isSerialActive ? '98%' : '0%',
       icon: Zap,
+      color: 'text-amber-600',
     },
     {
-      name: 'Optocoupler Safety Relay Interlock (Fan)',
-      protocol: `Digital Output (GPIO 18) · Interlock Status: ${thermal.hardwareSafetyStatus}`,
-      status: (thermal.hardwareSafetyStatus === 'READY' ? 'ONLINE' : thermal.hardwareSafetyStatus === 'UNVERIFIED' ? 'WAITING' : 'DEGRADED') as 'ONLINE' | 'DEGRADED' | 'WAITING',
-      latencyMs: isSerialActive ? 1 : undefined,
-      healthPct: thermal.hardwareSafetyStatus === 'READY' ? 100 : thermal.hardwareSafetyStatus === 'UNVERIFIED' ? 0 : 40,
-      icon: ShieldCheck,
-    },
-    {
-      name: '12V DC Micro-Climate Circulation Fan',
-      protocol: `Speed Command: ${thermal.fanCommand}`,
-      status: (thermal.fanCommand === 'OFF' ? 'STANDBY' : isSerialActive ? 'ONLINE' : 'STANDBY') as 'ONLINE' | 'STANDBY',
-      latencyMs: isSerialActive ? 2 : undefined,
-      healthPct: isSerialActive ? 95 : 0,
+      name: 'Circulation Fan & Exhaust',
+      type: 'Airflow Exchange Driver',
+      pin: 'GPIO 18 · Power MOSFET Driver',
+      protocol: `Fan Command: ${thermal.fanCommand} · Safety: ${thermal.hardwareSafetyStatus}`,
+      rate: 'Digital Level',
+      status: thermal.fanCommand === 'OFF' ? 'STANDBY' : isSerialActive ? 'ONLINE' : 'STANDBY',
+      latency: isSerialActive ? '2ms' : '—',
+      health: isSerialActive ? '95%' : '0%',
       icon: Fan,
+      color: 'text-slate-600',
     },
   ];
+
+  const statusBadge = (st: string) => {
+    switch (st) {
+      case 'ONLINE':
+        return <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">ONLINE</span>;
+      case 'DEGRADED':
+        return <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-amber-50 text-amber-800 border border-amber-200">DEGRADED</span>;
+      case 'WAITING':
+        return <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-blue-50 text-blue-700 border border-blue-200">WAITING</span>;
+      default:
+        return <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-slate-100 text-slate-500 border border-slate-200">{st}</span>;
+    }
+  };
 
   return (
-    <div className="space-y-6 animate-fade-in-up">
+    <div className="space-y-6">
       <SectionHeader
         icon={Cpu}
-        title="Hardware & Sensor Diagnostic Matrix"
-        subtitle="Separated clinical telemetry sensor health from ESP32 actuator hardware diagnostics"
-        badge={isSerialActive ? 'ESP32 ONLINE' : 'WAITING FOR HARDWARE'}
-        badgeVariant={isSerialActive ? 'emerald' : 'cyan'}
+        title="Hardware &amp; Sensor Health Matrix"
+        subtitle="Direct diagnostic bus monitoring for physical I²C sensors, 1-Wire probes, and ESP32 actuator drivers"
+        badge={isSerialActive ? 'HARDWARE CONNECTED' : 'AWAITING HARDWARE'}
+        badgeVariant={isSerialActive ? 'emerald' : 'blue'}
       />
 
-      {/* USB Web Serial Connection Control Panel */}
+      {/* Connection Panel */}
       <ESP32ConnectionPanel />
 
-      {/* Tier 1: Clinical Telemetry Sensors */}
-      <div className="bg-surface-1 border border-line-0 rounded-card p-5 space-y-4">
-        <div className="flex items-center justify-between border-b border-line-0 pb-3">
+      {/* Sensor Bus Matrix Table */}
+      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+        <div className="px-5 py-3.5 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Activity className="w-4 h-4 text-medical-cyan" />
-            <h3 className="text-sm font-sans font-bold text-slate-100">Tier 1 — Clinical Telemetry Sensing</h3>
+            <Radio className="w-4 h-4 text-blue-600" />
+            <h3 className="text-xs font-semibold text-[#172033] tracking-tight uppercase">
+              Physical Telemetry Sensor Bus (I²C / 1-Wire / Vision)
+            </h3>
           </div>
-          <span className="text-[10px] font-mono text-slate-400">4 CHANNELS</span>
+          <span className="text-[11px] font-mono text-slate-400">4 Registered Channels</span>
         </div>
 
-        <div className="space-y-3">
-          {clinicalSensors.map(sensor => (
-            <SensorHealthRow key={sensor.name} {...sensor} />
-          ))}
+        <div className="divide-y divide-slate-100 overflow-x-auto">
+          {sensorMatrix.map(sensor => {
+            const Icon = sensor.icon;
+            return (
+              <div key={sensor.name} className="p-4 flex items-center justify-between gap-4 hover:bg-slate-50/50 transition-colors min-w-[640px]">
+                <div className="flex items-center gap-3.5 min-w-[240px]">
+                  <div className="p-2 rounded-lg bg-slate-50 border border-slate-200 flex-shrink-0">
+                    <Icon className={`w-4 h-4 ${sensor.color}`} />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-semibold text-[#172033]">{sensor.name}</h4>
+                    <span className="text-[11px] text-slate-500 block font-normal">{sensor.type}</span>
+                  </div>
+                </div>
+
+                <div className="text-xs font-mono text-slate-600 min-w-[200px]">
+                  <span className="text-slate-400 text-[10px] block">PIN &amp; PROTOCOL</span>
+                  <span>{sensor.pin}</span>
+                  <span className="text-slate-400 block text-[10px] mt-0.5">{sensor.protocol}</span>
+                </div>
+
+                <div className="text-xs font-mono text-slate-600 text-center min-w-[80px]">
+                  <span className="text-slate-400 text-[10px] block">RATE</span>
+                  <span>{sensor.rate}</span>
+                </div>
+
+                <div className="text-xs font-mono text-slate-600 text-center min-w-[70px]">
+                  <span className="text-slate-400 text-[10px] block">LATENCY</span>
+                  <span>{sensor.latency}</span>
+                </div>
+
+                <div className="flex-shrink-0">
+                  {statusBadge(sensor.status)}
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
 
-      {/* Tier 2: ESP32 Hardware & Actuators */}
-      <div className="bg-surface-1 border border-line-0 rounded-card p-5 space-y-4">
-        <div className="flex items-center justify-between border-b border-line-0 pb-3">
+      {/* Actuator & Controller Matrix Table */}
+      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+        <div className="px-5 py-3.5 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Cpu className="w-4 h-4 text-violet-400" />
-            <h3 className="text-sm font-sans font-bold text-slate-100">Tier 2 — ESP32 Microcontroller & Actuators</h3>
+            <Cpu className="w-4 h-4 text-violet-600" />
+            <h3 className="text-xs font-semibold text-[#172033] tracking-tight uppercase">
+              ESP32 Microcontroller &amp; Actuator Drivers
+            </h3>
           </div>
-          <span className="text-[10px] font-mono text-slate-400">ESP-WROOM-32</span>
+          <span className="text-[11px] font-mono text-slate-400">ESP-WROOM-32 Subsystem</span>
         </div>
 
-        <div className="space-y-3">
-          {hardwareActuators.map(actuator => (
-            <SensorHealthRow key={actuator.name} {...actuator} />
-          ))}
+        <div className="divide-y divide-slate-100 overflow-x-auto">
+          {actuatorMatrix.map(act => {
+            const Icon = act.icon;
+            return (
+              <div key={act.name} className="p-4 flex items-center justify-between gap-4 hover:bg-slate-50/50 transition-colors min-w-[640px]">
+                <div className="flex items-center gap-3.5 min-w-[240px]">
+                  <div className="p-2 rounded-lg bg-slate-50 border border-slate-200 flex-shrink-0">
+                    <Icon className={`w-4 h-4 ${act.color}`} />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-semibold text-[#172033]">{act.name}</h4>
+                    <span className="text-[11px] text-slate-500 block font-normal">{act.type}</span>
+                  </div>
+                </div>
+
+                <div className="text-xs font-mono text-slate-600 min-w-[200px]">
+                  <span className="text-slate-400 text-[10px] block">LINE &amp; CONTROL</span>
+                  <span>{act.pin}</span>
+                  <span className="text-slate-400 block text-[10px] mt-0.5">{act.protocol}</span>
+                </div>
+
+                <div className="text-xs font-mono text-slate-600 text-center min-w-[80px]">
+                  <span className="text-slate-400 text-[10px] block">RATE</span>
+                  <span>{act.rate}</span>
+                </div>
+
+                <div className="text-xs font-mono text-slate-600 text-center min-w-[70px]">
+                  <span className="text-slate-400 text-[10px] block">LATENCY</span>
+                  <span>{act.latency}</span>
+                </div>
+
+                <div className="flex-shrink-0">
+                  {statusBadge(act.status)}
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
-
-      {/* Firmware & Protocol Footer */}
-      <div className="flex flex-wrap items-center justify-between gap-4 p-4 bg-surface-0 border border-line-0 rounded-card text-xs font-mono text-slate-400">
-        <div className="flex items-center gap-3">
-          <span>Firmware: <strong className="text-medical-cyan font-bold">AVENZA-ESP32-v1.0.0</strong></span>
-          <span className="text-line-0">|</span>
-          <span>Baud: <strong className="text-slate-200">115,200</strong></span>
-        </div>
-        <div className="flex items-center gap-3">
-          <span>Protocol: <strong className="text-slate-400">5 Hz JSON-lines over USB</strong></span>
-          <span className="text-line-0">|</span>
-          <span>Shield: <strong className="text-violet-400">Active</strong></span>
-        </div>
-      </div>
-
-      <ClinicalDisclaimer compact />
     </div>
   );
 };

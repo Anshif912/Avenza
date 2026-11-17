@@ -1,132 +1,91 @@
-# AVENZA
+# AVENZA — Educational IoT Neonatal-Environment Monitoring Prototype
 
-**Intelligent Neonatal Monitoring & AI-Assisted Apnea Event Detection**
-
-> **AI-ASSISTED APNEA EVENT DETECTION — PROTOTYPE**  
-> *Multimodal neonatal monitoring and prototype apnea-event detection.*
+> ### **CRITICAL EDUCATIONAL & ACADEMIC DISCLAIMER**  
+> **AVENZA is a student educational and engineering research prototype developed for IoT environmental monitoring and experimental multi-sensor telemetry visualization.**  
+> - **IT IS NOT A CERTIFIED MEDICAL DEVICE.**  
+> - **IT MUST NEVER BE USED FOR MONITORING, DIAGNOSING, OR REGULATING ACTUAL NEONATAL INFANTS OR CLINICAL PATIENTS.**  
+> - **Raw optical readings (MAX30102) and temperature setpoints are experimental demonstration values, not clinical vital signs.**
 
 ---
 
 ## Overview
 
-**AVENZA** is an advanced neonatal intensive care monitoring and research prototype designed to assist clinicians in detecting apnea events through real-time multimodal sensor fusion. 
+AVENZA integrates an **ESP32-WROOM-32 microcontroller** with a **modern web dashboard (React 18 + TypeScript + Vite + TailwindCSS)** to monitor simulated micro-climate environmental conditions (chamber temperature, ambient air temperature, relative humidity, raw optical reflectance) and manage thermal actuators with strict hardware safety interlocks.
 
-By integrating optical photoplethysmography (PPG), contactless infrared thermometry, closed-loop thermal microclimate regulation, and computer-vision thoracic movement tracking, AVENZA provides continuous, non-invasive surveillance with full algorithmic explainability and data provenance.
-
----
-
-## Key Capabilities & Architecture
-
-### 1. Multimodal Sensor Fusion
-- **MAX30102 Optical PPG**: Real-time pulse oximetry (SpO2) and heart rate (HR) monitoring with signal quality index (SQI) and perfusion validation.
-- **MLX90614 Contactless IR**: Continuous skin and incubator micro-environment ambient temperature monitoring.
-- **Laptop / Clinical Webcam Thoracic Tracking**: Non-contact optical flow motion vector analysis over region-of-interest (ROI) bounding boxes (Chest Standard, Abdominal Prone, Wide Thoracic).
-- **Algorithmic Weighting**: Calibrated 40% Camera Motion Evidence + 35% SpO2 Desaturation + 25% Heart Rate Deceleration.
-
-### 2. Clinical Reference vs. Prototype Detection Layer
-- **Clinical Reference Layer**: Evidence-informed normative ranges stratified by gestational maturity (Term, Late Preterm, Preterm, Extremely Low Birth Weight) derived from authoritative clinical guidelines (AAP, WHO, NIH).
-- **Prototype Algorithmic Temporal Window**: Evaluates a 10-second rolling multi-signal window (`DETECTION_WINDOW_MS = 10,000ms`) for early awareness, clearly distinguished from the standard >= 20s diagnostic cessation threshold.
-- **Single-Channel Safety Interlock**: Requires >= 2 corroborating physiological channels before advancing to `CONFIRMED` apnea state.
-
-### 3. Strict Operating Mode Separation
-- **LIVE MODE**: Default operational mode. Displays real incoming sensor data, authentic zero-states, and connection health metrics. **Zero synthetic data leakage** into clinical screens.
-- **EXPLICIT DEMO MODE**: 12-phase deterministic cardiorespiratory simulation engine with full event injection (bradycardia, central/obstructive apnea, motion artifacts, thermal overheating, sensor disconnects). Distinct purple HUD badge indicates simulation active.
-
-### 4. Transparent Decision Support & Forensic Replay
-- **Why Was This Event Flagged?**: Real-time attribution matrix breaking down exact sensor contributions, baseline deltas, and quality shield validation for every alert.
-- **Synchronized Event Replay**: Frame-by-frame scrubbing through 8 physiological telemetry channels across pre-apnea, onset, nadir, and recovery phases.
-
-### 5. Closed-Loop Thermal Microclimate Control
-- Embedded PID controller managing Peltier thermoelectric elements (Heating/Cooling) and variable-speed fan aeration with a hardware safety cutoff at 35.0°C.
+### Key Capabilities
+- **Local Wi-Fi REST API**: ESP32 runs an in-memory HTTP server (`/api/health`, `/api/data`, `/api/history`, `/api/config`, `/api/control`) with full CORS preflight.
+- **Micro-Climate Sensing**: DS18B20 1-Wire chamber probe (GPIO 4 with 4.7kΩ pull-up) + DHT11 ambient air temperature and humidity (GPIO 5).
+- **Raw Optical Reflectance**: MAX30102 PPG sensor over hardware I2C (SDA=32, SCL=33, address 0x57) labeled strictly as uncalibrated experimental data.
+- **Autonomous Thermal Regulation**: Configurable demonstration hysteresis setpoint (30.0°C Fan ON, 29.5°C Fan OFF).
+- **Safety Interlocks & Failsafes**:
+  - Heatsink Fan Interlock: Circulation fan is forced ON whenever the Peltier element is energized.
+  - Thermal Emergency Shutdown: Hard-limit shutoff at ≥ 38.0°C.
+  - Manual Failsafe Timeout: Reverts manual override to safe AUTO mode after 60 seconds of inactivity.
+  - Break-Before-Make: 100 ms dead-time to protect relay contacts.
+- **Offline / Mock Simulation Engine**: Full-fidelity Node.js mock ESP32 server (`scripts/mock_esp32_server.js`) allowing complete software development and testing without physical hardware.
 
 ---
 
-## Project Structure
+## Hardware Pin Mapping
 
-```
-c:/games/NEONATTLE/
-├── public/
-│   ├── favicon.svg                # AVENZA medical-tech SVG favicon
-│   └── index.html                 # App container with AVENZA metadata
-├── src/
-│   ├── components/
-│   │   ├── camera/                # Webcam ROI tracker & motion estimator
-│   │   ├── common/                # AvenzaLogo, Header, Sidebar, Modals, Disclaimers
-│   │   └── design-system/         # Calibrated HUD cards, gauges, badges, weight bars
-│   ├── config/
-│   │   └── brand.ts               # Centralized AVENZA brand definition & storage keys
-│   ├── context/
-│   │   └── MonitoringContext.tsx  # Central state management (LIVE vs DEMO separation)
-│   ├── data/
-│   │   └── clinicalReferences.ts  # Stratified reference ranges & guideline citations
-│   ├── pages/                     # Full clinical workflow pages
-│   │   ├── LandingPage.tsx        # Public product overview & entry point
-│   │   ├── LoginPage.tsx          # Operator intake authentication
-│   │   ├── SessionSetupPage.tsx   # Patient intake & sensor ROI setup
-│   │   ├── DashboardPage.tsx      # Command Center HUD & telemetry snapshot
-│   │   ├── AIApneaPage.tsx        # Multimodal fusion & evidence attribution
-│   │   ├── LiveMonitoringPage.tsx # 8-channel synchronized live waveforms
-│   │   ├── AlertsPage.tsx         # Severity triage & acknowledgement log
-│   │   ├── EventHistoryPage.tsx   # Historical audit trail & provenance
-│   │   ├── EventReplayPage.tsx    # 12-phase synchronized scrubber
-│   │   ├── AnalyticsPage.tsx      # Trend analysis, distributions, CSV/PDF export
-│   │   ├── ThermalControlPage.tsx # PID thermal microclimate console
-│   │   ├── SensorHealthPage.tsx   # Diagnostic matrix (I2C, GPIO, USB ROI)
-│   │   ├── BabySessionPage.tsx    # Subject profile & active session lifecycle
-│   │   └── SettingsPage.tsx       # Fusion weights & threshold configuration
-│   ├── services/
-│   │   ├── ApneaFusionEngine.ts   # Core multimodal evidence fusion engine
-│   │   ├── CameraService.ts       # Computer-vision optical motion tracker
-│   │   └── SyntheticDataEngine.ts # 12-phase simulation & event generator
-│   ├── types/
-│   │   ├── avenza.ts              # Primary TypeScript definitions
-│   │   └── neonattle.ts           # Backward-compatibility alias layer
-│   ├── App.tsx                    # Route controller & shell
-│   ├── index.css                  # Dark-first medical HUD CSS design tokens
-│   └── main.tsx                   # React root entry
-└── package.json                   # Project configuration
-```
+| Component | ESP32 GPIO | Operating Voltage | Notes |
+| :--- | :--- | :--- | :--- |
+| **DHT11 Air Sensor** | `GPIO 5` | 3.3V | Single-bus data line (temperature & humidity) |
+| **DS18B20 Chamber Probe** | `GPIO 4` | 3.3V | 1-Wire bus. **Requires external 4.7kΩ pull-up to 3.3V** |
+| **MAX30102 Optical PPG** | `GPIO 32 (SDA), GPIO 33 (SCL)` | 3.3V | Hardware I2C (Address `0x57`). Raw IR/Red channels |
+| **SSD1306 OLED (128x64)** | `GPIO 32 (SDA), GPIO 33 (SCL)` | 3.3V | Shared I2C (Address `0x3C`). Headless fallback if absent |
+| **Relay IN1 (Circulation Fan)**| `GPIO 18` | 5V Coil / 3.3V Logic | Active-LOW trigger (`LOW = ON`, `HIGH = OFF`) |
+| **Relay IN2 (Peltier Element)**| `GPIO 25` | 5V Coil / 3.3V Logic | Active-LOW trigger. Interlocked with Fan |
+| **LEDs (Red, Yellow, Green)** | `GPIO 13, 14, 23` | 3.3V Logic | 220Ω series resistors to GND |
+
+*Power Supply*: 12V 5A DC regulated power supply with a 5A main fuse on the 12V line and a 1A branch fuse on the fan line. Step-down buck converter (12V → 5V) powers the ESP32 VIN pin. **Never connect 12V directly to ESP32 pins.**
 
 ---
 
-## Getting Started
+## Quick Start: Exact Execution Steps
 
-### Prerequisites
-- Node.js (v18.0.0 or higher)
-- npm or yarn
-
-### Installation
+### 1. Running the Web Dashboard
 ```bash
-# Clone repository
-git clone <repository-url>
-cd avenza
-
-# Install dependencies
 npm install
-```
-
-### Development Server
-```bash
 npm run dev
 ```
-Navigate to `http://localhost:5173` in your browser.
+Open `http://localhost:3000` in Google Chrome or Microsoft Edge.
 
-### Production Build
+### 2. Running the Mock ESP32 Server (Offline Testing)
+In a separate terminal:
 ```bash
-npm run build
+npm run mock:esp32
 ```
+Starts the mock HTTP REST server at `http://localhost:8080`. The dashboard's built-in Vite proxy transparently routes `/api/esp32` requests to this mock server.
+
+### 3. Running Automated API Tests
+```bash
+npm test
+```
+Executes `tests/esp32-api.test.mjs`, running 41 assertion tests against the API schema, error handling, heatsink interlocks, and CORS headers.
+
+### 4. Flashing Physical ESP32 Firmware
+1. Open `firmware/avenza_esp32/avenza_esp32.ino` in **Arduino IDE 2.x**.
+2. Open `HardwareConfig.h` and enter your Wi-Fi credentials:
+   ```cpp
+   #define WIFI_SSID_DEFAULT     "Your_WiFi_SSID"
+   #define WIFI_PASSWORD_DEFAULT "Your_WiFi_Password"
+   ```
+3. In Arduino IDE, select board **ESP32 Dev Module**, select your COM port, and click **Upload**.
+4. Open the Serial Monitor at **115200 baud** to view the I2C scan and copy the assigned IP address (e.g. `http://192.168.1.150`).
+5. In the web dashboard, open the **IoT Hardware** workspace (or the **ESP32 IoT Console & Controls** tab), click **Configure Target**, enter `http://192.168.1.150`, and click **Save & Connect**.
 
 ---
 
-## Clinical & Regulatory Disclaimer
+## Documentation Directory (`docs/`)
 
-> **PROTOTYPE & DEMO DISCLAIMER**  
-> **AVENZA IS AN EDUCATIONAL AND RESEARCH PROTOTYPE.**  
-> The Prototype Apnea Score and algorithmic classifications are evidence-derived model outputs and are **NOT A CLINICAL DIAGNOSIS**.  
-> Sensor measurements may be affected by patient motion, poor perfusion, anatomical probe placement, and ambient lighting. This system is **not FDA/CE cleared** and is not a substitute for a clinically validated, certified medical monitor or standard neonatal care protocols.
+Comprehensive technical guides are available in the [`docs/`](file:///c:/Avenza/docs/) directory:
 
----
-
-## License
-
-MIT License. Copyright © 2026 AVENZA Health Technologies.
+- [**docs/architecture.md**](file:///c:/Avenza/docs/architecture.md): End-to-end architecture diagram, data pipelines, non-blocking task scheduler, and multi-layer safety design.
+- [**docs/api-contract.md**](file:///c:/Avenza/docs/api-contract.md): Complete JSON request/response schemas for `/api/health`, `/api/data`, `/api/history`, `/api/config`, and `/api/control`.
+- [**docs/hardware-wiring.md**](file:///c:/Avenza/docs/hardware-wiring.md): Electrical schematic, 12V 5A power distribution, branch fusing, active-LOW relay verification, and heatsink mounting.
+- [**docs/setup-and-run.md**](file:///c:/Avenza/docs/setup-and-run.md): Step-by-step setup guide for both physical hardware and offline simulation modes.
+- [**docs/testing-checklist.md**](file:///c:/Avenza/docs/testing-checklist.md): Multi-stage verification checklist (software builds, physical I2C scan, relay bench tests, 38°C cutoff test).
+- [**docs/troubleshooting.md**](file:///c:/Avenza/docs/troubleshooting.md): Solutions for COM port busy errors, Wi-Fi connectivity, CORS/mixed content, DS18B20 `-127°C` errors, and power supply brownouts.
+- [**docs/safety-and-limitations.md**](file:///c:/Avenza/docs/safety-and-limitations.md): Detailed academic non-clinical disclaimer, sensor scope boundaries, and high-current electrical safety protocols.
+- [**firmware/README.md**](file:///c:/Avenza/firmware/README.md): Dedicated ESP32 firmware guide, library installation steps, and hardware configuration.

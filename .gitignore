@@ -75,3 +75,7 @@ ENV/
 .coverage
 htmlcov/
 
+
+# Local screenshots & skill lockfiles
+*.png
+skills-lock.json

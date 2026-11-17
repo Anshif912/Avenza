@@ -2,7 +2,7 @@ import { ReplayFrame, ReplaySession, SignalQuality, AIApneaState } from '../type
 
 /**
  * ============================================================================
- * AVENZA — EVENT REPLAY SERVICE & BUFFER ENGINE
+ * NEONATTLE: EVENT REPLAY SERVICE & BUFFER ENGINE (DEVELOPED BY AVENZA)
  * ============================================================================
  * 
  * CORE GUARANTEES:
@@ -109,7 +109,7 @@ export class EventReplayService {
         cameraMovement: 'MEASURED',
         actuatorStates: 'MEASURED'
       },
-      notes: 'Captured live during AVENZA prototype monitoring session.'
+      notes: 'Captured live during NeoNattle prototype monitoring session.'
     };
 
     this.sessions.set(eventId, session);
@@ -319,7 +319,7 @@ export class EventReplayService {
 
     const session1: ReplaySession = {
       eventId: 'EVT-2026-0819-01',
-      sessionTitle: 'Apnea Event Flagged — Camera Motion Drop corroborated by SpO2 & HR Deceleration',
+      sessionTitle: 'Apnea Event Flagged: Camera Motion Drop corroborated by SpO2 & HR Deceleration',
       recordedAt: '2026-09-18 19:42:15',
       totalDurationSec: 80,
       preEventDurationSec: 30,
@@ -358,7 +358,7 @@ export class EventReplayService {
 
     const session2: ReplaySession = {
       eventId: 'EVT-2026-0819-02',
-      sessionTitle: 'Transient Pause — Isolated Chest Motion Attenuation (Single-Channel Safety Active)',
+      sessionTitle: 'Transient Pause: Isolated Chest Motion Attenuation (Single-Channel Safety Active)',
       recordedAt: '2026-09-18 21:10:04',
       totalDurationSec: 65,
       preEventDurationSec: 25,

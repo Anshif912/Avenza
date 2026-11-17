@@ -1,401 +1,461 @@
-import React from 'react';
+import React, { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useMonitoring } from '../context/MonitoringContext';
 import {
-  Heart, Activity, Thermometer, BrainCircuit,
-  AlertTriangle, ArrowRight, Layers, Usb, RefreshCw, XCircle, Info
+  Thermometer, Activity, Heart, Gauge, ShieldAlert, Cpu,
+  ArrowRight, Clock, CheckCircle2, AlertCircle, Droplets, Fan,
+  Sliders, Wifi
 } from 'lucide-react';
-import { ResponsiveContainer, AreaChart, Area, YAxis, CartesianGrid, Tooltip } from 'recharts';
-import { ClinicalReferencePanel } from '../components/common/ClinicalReferencePanel';
-import {
-  VitalMetricCard, SpotlightCard, ApneaStateBadge,
-  ArcGauge, FusionWeightBar, SectionHeader, ClinicalDisclaimer
-} from '../components/design-system/DesignSystemComponents';
+import { SignalQualityBadge, DataSourceBadge } from '../components/design-system/DesignSystemComponents';
+import { ESP32IoTConsole } from '../components/iot/ESP32IoTConsole';
 
 export const DashboardPage: React.FC = () => {
   const {
     vitals,
-    apnea,
     thermal,
-    waveforms,
-    setActiveTab,
-    setSelectedEvent,
+    sensors,
     alerts,
     serialStatus,
-    serialStats,
-    serialError,
-    isSerialSupported,
-    connectSerial,
-    disconnectSerial
+    httpStatus,
+    isDemoMode
   } = useMonitoring();
 
-  const isConnected = serialStatus === 'CONNECTED';
-  const recentAlerts = alerts.slice(0, 4);
-  const evidence = apnea.multimodalEvidence;
-  const recentWaveforms = waveforms.slice(-60);
+  const [activeView, setActiveView] = useState<'overview' | 'iot'>('overview');
+  const isConnected = serialStatus === 'CONNECTED' || httpStatus === 'CONNECTED';
+  const recentAlerts = alerts.slice(0, 3);
+  const unackCount = alerts.filter(a => !a.acknowledged && (a.severity === 'CRITICAL' || a.severity === 'WARNING')).length;
 
-  const isEvaluating = apnea.state !== 'NO_EVALUATION';
-  const refContext = evidence.clinicalReferenceContext;
+  const getSensorStatus = (id: string) => {
+    const s = sensors.find(item => item.id === id || item.name.toLowerCase().includes(id.toLowerCase()));
+    if (!s) return { status: 'STANDBY', online: false };
+    return {
+      status: s.connectionStatus,
+      online: s.connectionStatus === 'CONNECTED'
+    };
+  };
+
+  const esp32 = getSensorStatus('esp32');
+  const dht11 = getSensorStatus('dht11');
+  const ds18b20 = getSensorStatus('ds18b20');
+  const max30102 = getSensorStatus('max30102');
+  const camera = getSensorStatus('camera');
+  const activeSensorsCount = [esp32.online, dht11.online, ds18b20.online, max30102.online, camera.online].filter(Boolean).length;
 
   return (
-    <div className="space-y-6 animate-fade-in-up">
-      <SectionHeader
-        icon={BrainCircuit}
-        title="Multimodal Telemetry Command Center"
-        subtitle="Real-time cardiorespiratory fusion · non-contact vision · thermal regulation"
-        badge={isConnected ? 'ESP32 LIVE (115.2k)' : 'WAITING FOR HARDWARE'}
-        badgeVariant={isConnected ? 'emerald' : 'amber'}
-        action={
-          <button
-            onClick={() => setActiveTab('aiApnea')}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-violet-950 hover:bg-violet-900 text-violet-300 border border-violet-500/40 rounded-card text-xs font-mono font-bold transition-colors cursor-pointer"
-          >
-            Evidence Deep Dive <ArrowRight className="w-3.5 h-3.5" />
-          </button>
-        }
-      />
+    <div className="space-y-6">
 
-      {/* ─── HARDWARE CONNECTION BANNER ──────────────────────────── */}
-      {!isConnected ? (
-        <div className="bg-surface-1 border border-cyan-500/30 rounded-card p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-card">
-          <div className="flex items-start gap-3">
-            <div className="w-9 h-9 rounded-xl bg-medical-cyan/10 border border-medical-cyan/30 flex items-center justify-center shrink-0">
-              <Usb className="w-5 h-5 text-medical-cyan" />
-            </div>
-            <div>
-              <h4 className="text-sm font-sans font-bold text-slate-100 flex items-center gap-2">
-                Connect Real ESP32 Hardware
-                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-surface-0 border border-line-0 text-cyan-300">
-                  USB Serial · 115,200 Baud
-                </span>
-              </h4>
-              <p className="text-xs font-sans text-slate-400 mt-0.5">
-                Stream real-time MAX30102 PPG, DS18B20 probe temperature, and DHT11 humidity into the dashboard.
-              </p>
-              <div className="text-[11px] font-mono text-amber-300/90 mt-1 flex items-center gap-1">
-                <Info className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                <span>Make sure the <strong>Arduino Serial Monitor</strong> is closed before connecting.</span>
-              </div>
-            </div>
+      {/* ─── 00. QUIET PROTOTYPE DISCLAIMER BANNER ─── */}
+      <div className="bg-white border border-slate-200 rounded-xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-lg bg-blue-50 border border-blue-200/80 flex items-center justify-center text-blue-600 shrink-0">
+            <ShieldAlert className="w-4 h-4" />
           </div>
-
-          <div className="flex items-center gap-2.5 shrink-0 self-end md:self-center">
-            {serialError && (
-              <span className="text-xs font-mono text-rose-400 max-w-xs truncate" title={serialError}>
-                {serialError}
+          <div>
+            <div className="text-xs font-semibold text-[#172033] flex items-center gap-2">
+              <span>Research Evaluation Platform</span>
+              <span className="text-[10px] font-mono text-blue-700 bg-blue-50 border border-blue-200 px-1.5 py-0.5 rounded font-bold">
+                PROTOTYPE v2.4
               </span>
-            )}
-            <button
-              onClick={connectSerial}
-              disabled={!isSerialSupported || serialStatus === 'CONNECTING'}
-              className="flex items-center gap-2 px-5 py-2.5 bg-medical-cyan hover:brightness-110 text-black font-extrabold font-sans text-xs rounded-xl transition-all shadow-md cursor-pointer disabled:opacity-50"
-            >
-              {serialStatus === 'CONNECTING' ? (
-                <>
-                  <RefreshCw className="w-4 h-4 animate-spin" />
-                  Selecting Port...
-                </>
-              ) : (
-                <>
-                  <Usb className="w-4 h-4" />
-                  CONNECT ESP32 (COM3)
-                </>
-              )}
-            </button>
+            </div>
+            <p className="text-xs text-slate-500 font-sans mt-0.5">
+              Not cleared for clinical diagnostic or life-critical decision making. MAX30102 calibration is provisional.
+            </p>
           </div>
         </div>
+        <div className="flex items-center gap-2 text-xs font-mono shrink-0">
+          <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border ${
+            isConnected ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-slate-50 text-slate-600 border-slate-200'
+          }`}>
+            <span className={`w-1.5 h-1.5 rounded-full ${isConnected ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`} />
+            {isConnected ? 'ESP32 Streaming' : isDemoMode ? 'Simulated Telemetry' : 'Hardware Idle'}
+          </span>
+        </div>
+      </div>
+
+      {/* ─── WORKSPACE VIEW TOGGLE (Overview vs IoT Hardware Console) ─── */}
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-3">
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setActiveView('overview')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+              activeView === 'overview'
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
+            }`}
+          >
+            System Overview
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveView('iot')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+              activeView === 'iot'
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
+            }`}
+          >
+            <Sliders className="w-3.5 h-3.5" />
+            <span>ESP32 IoT Console & Controls</span>
+            {httpStatus === 'CONNECTED' && (
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse ml-1" />
+            )}
+          </button>
+        </div>
+
+        <Link
+          to="/iot"
+          className="text-xs font-mono text-blue-600 hover:text-blue-800 flex items-center gap-1 hover:underline"
+        >
+          <span>Dedicated IoT View →</span>
+        </Link>
+      </div>
+
+      {activeView === 'iot' ? (
+        <ESP32IoTConsole />
       ) : (
-        <div className="bg-emerald-950/20 border border-emerald-500/30 rounded-card px-4 py-2.5 flex flex-wrap items-center justify-between gap-3 text-xs font-mono">
+        <>
+      {/* ─── 01. ENVIRONMENTAL MICRO-CLIMATE (Horizontal Reading & Datum) ─── */}
+      <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-[0_1px_2px_rgba(0,0,0,0.03)] space-y-5">
+        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
           <div className="flex items-center gap-2.5">
-            <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping" />
-            <span className="text-emerald-300 font-bold">ESP32 TELEMETRY STREAM ACTIVE</span>
-            <span className="text-slate-500">|</span>
-            <span className="text-slate-300">Port: Web Serial @ 115,200 baud</span>
-            <span className="text-slate-500">|</span>
-            <span className="text-emerald-400 font-semibold">{serialStats.packetsReceived.toLocaleString()} packets received</span>
+            <Thermometer className="w-4 h-4 text-blue-600" />
+            <h2 className="text-xs font-semibold text-[#172033] uppercase tracking-wider">
+              Environmental Micro-Climate
+            </h2>
           </div>
-
-          <button
-            onClick={disconnectSerial}
-            className="flex items-center gap-1.5 text-slate-400 hover:text-rose-400 transition-colors cursor-pointer"
+          <Link
+            to="/environment"
+            className="text-xs font-medium text-blue-600 hover:text-blue-800 flex items-center gap-1.5 transition-colors cursor-pointer group"
           >
-            <XCircle className="w-3.5 h-3.5" />
-            <span>Disconnect</span>
-          </button>
+            <span>Environmental Controls</span>
+            <ArrowRight className="w-3.5 h-3.5 transition-transform duration-200 group-hover:translate-x-0.5" />
+          </Link>
         </div>
-      )}
 
-      {/* ─── ROW 1: Apnea State + Vitals ─────────────────────────── */}
-      <div className="grid grid-cols-1 xl:grid-cols-4 gap-5">
-
-        {/* Apnea State — spans 1 col, tall card */}
-        <SpotlightCard glowColor={apnea.state === 'CONFIRMED' ? 'rose' : apnea.state === 'SUSPECTED' ? 'amber' : 'violet'} className="p-6 space-y-5 flex flex-col items-center justify-center text-center">
-          <div className="space-y-2">
-            <div className="text-[11px] font-mono font-bold text-slate-400 uppercase tracking-wider">Prototype Apnea Score</div>
-            <ArcGauge
-              value={isEvaluating ? apnea.probability : null}
-              size={170}
-              critical={apnea.state === 'CONFIRMED'}
-            />
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          {/* Chamber Temperature */}
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between text-xs text-slate-500">
+              <span className="font-medium text-slate-600">Chamber Probe</span>
+              <span className="text-[10px] font-mono text-slate-400">DS18B20</span>
+            </div>
+            <div className="flex items-baseline gap-2">
+              <span className="text-3xl sm:text-4xl font-semibold text-[#172033] font-mono tabular-nums">
+                {thermal.chamberTemp !== null ? thermal.chamberTemp.toFixed(1) : '—'}
+              </span>
+              <span className="text-sm font-sans text-slate-500">°C</span>
+            </div>
+            <div className="text-[11px] font-mono text-slate-500 pt-1 flex items-center justify-between">
+              <span>Target Setpoint: {thermal.targetTemp.toFixed(1)}°C</span>
+              <DataSourceBadge source={isConnected ? "MEASURED" : "SIMULATED"} />
+            </div>
           </div>
-          <ApneaStateBadge state={apnea.state} size="md" />
-          <p className="text-[11px] font-mono text-slate-400 max-w-[180px]">{evidence.reason}</p>
-          <button
-            onClick={() => setActiveTab('aiApnea')}
-            className="w-full py-2 rounded-xl bg-violet-950/80 hover:bg-violet-900 text-violet-300 border border-violet-500/30 text-xs font-mono font-bold transition-colors cursor-pointer"
-          >
-            Full Evidence Console →
-          </button>
-        </SpotlightCard>
 
-        {/* Vitals — 3 col */}
-        <div className="xl:col-span-3 grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <VitalMetricCard
-            title="Heart Rate"
-            value={vitals.heartRate}
-            unit="BPM"
-            baseline={evidence.baselines.heartRate.baseline ?? '--'}
-            delta={vitals.heartRate !== null ? evidence.baselines.heartRate.deltaBpm : undefined}
-            deltaUnit=" BPM"
-            signalQuality={vitals.signalQuality}
-            source={vitals.heartRateSource || 'SIMULATED'}
-            icon={Heart}
-            accentColor="rose"
-            dataAgeSec={vitals.dataAgeSeconds}
-            isCritical={apnea.state === 'CONFIRMED' && evidence.baselines.heartRate.deltaBpm < -15}
-            waitingLabel="WAITING FOR SIGNAL"
-            referenceRangeText={refContext?.hrEvaluation?.referenceText || '100–160 BPM'}
-            referenceStatusLabel={refContext?.hrEvaluation?.statusLabel || 'WITHIN REFERENCE'}
-            referenceStatusWarning={refContext?.hrEvaluation?.isWarning}
-          />
-          <VitalMetricCard
-            title="SpO₂ Saturation"
-            value={vitals.spo2}
-            unit="%"
-            baseline={evidence.baselines.spo2.baseline ?? '--'}
-            delta={vitals.spo2 !== null ? evidence.baselines.spo2.deltaPercent : undefined}
-            deltaUnit="%"
-            signalQuality={evidence.spo2Evidence.quality}
-            source={vitals.spo2Source || 'SIMULATED'}
-            icon={Activity}
-            accentColor="cyan"
-            dataAgeSec={vitals.dataAgeSeconds}
-            isCritical={vitals.spo2 !== null && vitals.spo2 < 85}
-            waitingLabel="UNCALIBRATED"
-            referenceRangeText={refContext?.spo2Evaluation?.targetText || '92–98%'}
-            referenceStatusLabel={refContext?.spo2Evaluation?.statusLabel || 'WITHIN TARGET'}
-            referenceStatusWarning={refContext?.spo2Evaluation?.isDesaturating}
-          />
-          <VitalMetricCard
-            title="Chamber Temp"
-            value={vitals.chamberTemp !== null ? vitals.chamberTemp.toFixed(1) : null}
-            unit="°C"
-            baseline={vitals.chamberTemp !== null ? `${vitals.targetTemp.toFixed(1)} target` : '--'}
-            delta={vitals.chamberTemp !== null ? parseFloat((vitals.chamberTemp - vitals.targetTemp).toFixed(1)) : undefined}
-            deltaUnit="°C"
-            signalQuality={vitals.chamberTemp !== null ? 'GOOD' : 'POOR'}
-            source="MEASURED"
-            icon={Thermometer}
-            accentColor="amber"
-            dataAgeSec={vitals.dataAgeSeconds}
-            waitingLabel="WAITING FOR SENSOR"
-            referenceRangeText={refContext?.tempEvaluation?.referenceText || '36.5–37.5 °C'}
-            referenceStatusLabel={refContext?.tempEvaluation?.statusLabel || 'WITHIN REFERENCE'}
-            referenceStatusWarning={refContext?.tempEvaluation?.isWarning}
-          />
+          {/* Ambient Air Temp */}
+          <div className="space-y-1.5 md:border-l md:border-slate-100 md:pl-6">
+            <div className="flex items-center justify-between text-xs text-slate-500">
+              <span className="font-medium text-slate-600">Ambient Air Temp</span>
+              <span className="text-[10px] font-mono text-slate-400">DHT11</span>
+            </div>
+            <div className="flex items-baseline gap-2">
+              <span className="text-3xl sm:text-4xl font-semibold text-[#172033] font-mono tabular-nums">
+                {sensors.find(s => s.id === 'dht11')?.validity === 'VALID'
+                  ? sensors.find(s => s.id === 'dht11')?.lastReading.split(',')[0].replace('°C', '').trim()
+                  : '—'}
+              </span>
+              <span className="text-sm font-sans text-slate-500">°C</span>
+            </div>
+            <div className="text-[11px] font-mono text-slate-500 pt-1 flex items-center justify-between">
+              <span>Single-Bus GPIO 5</span>
+              <span className="text-[10px] text-slate-400">{dht11.online ? 'Active' : 'Standby'}</span>
+            </div>
+          </div>
+
+          {/* Relative Humidity */}
+          <div className="space-y-1.5 md:border-l md:border-slate-100 md:pl-6">
+            <div className="flex items-center justify-between text-xs text-slate-500">
+              <span className="font-medium text-slate-600">Relative Humidity</span>
+              <span className="text-[10px] font-mono text-slate-400">DHT11</span>
+            </div>
+            <div className="flex items-baseline gap-2">
+              <span className="text-3xl sm:text-4xl font-semibold text-blue-700 font-mono tabular-nums">
+                {thermal.humidity !== null ? thermal.humidity : '—'}
+              </span>
+              <span className="text-sm font-sans text-slate-500">% RH</span>
+            </div>
+            <div className="text-[11px] font-mono text-slate-500 pt-1 flex items-center justify-between">
+              <span>Chamber Equilibrium</span>
+              <span className="text-[10px] text-emerald-700 font-semibold">Nominal</span>
+            </div>
+          </div>
         </div>
       </div>
 
-      {/* ─── CLINICAL REFERENCE LAYER EMBED ──────────────────────── */}
-      <ClinicalReferencePanel />
+      {/* ─── 02 & 03: PHYSIOLOGY & ACTUATION (Asymmetric 2-Column Workspace) ─── */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
 
-      {/* ─── ROW 2: Fusion Weights + Waveform Strip ───────────────── */}
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-5">
-
-        {/* Fusion Weight attribution */}
-        <SpotlightCard glowColor="violet" className="lg:col-span-2 p-5 space-y-4">
-          <div className="flex items-center gap-2">
-            <Layers className="w-4 h-4 text-violet-400" />
-            <span className="text-sm font-sans font-bold text-slate-200">Dynamic Fusion Weights</span>
-          </div>
-          <FusionWeightBar
-            weights={evidence.prototypeWeights}
-            effectiveWeights={evidence.effectiveWeights}
-          />
-          <ClinicalDisclaimer compact />
-        </SpotlightCard>
-
-        {/* Live waveform strip */}
-        <SpotlightCard glowColor="cyan" className="lg:col-span-3 p-5 space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Activity className="w-4 h-4 text-cyan-400" />
-              <span className="text-sm font-sans font-bold text-slate-200">Live Signal Streams</span>
+        {/* 02. Physiological Signals (7 Columns) */}
+        <div className="lg:col-span-7 bg-white border border-slate-200 rounded-xl p-6 shadow-[0_1px_2px_rgba(0,0,0,0.03)] space-y-5">
+          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+            <div className="flex items-center gap-2.5">
+              <Activity className="w-4 h-4 text-blue-600" />
+              <h2 className="text-xs font-semibold text-[#172033] uppercase tracking-wider">
+                Physiological Telemetry
+              </h2>
             </div>
-            <button
-              onClick={() => setActiveTab('liveMonitoring')}
-              className="text-xs font-mono text-cyan-400 hover:text-cyan-300 flex items-center gap-1 transition-colors cursor-pointer"
+            <Link
+              to="/live-monitoring"
+              className="text-xs font-medium text-blue-600 hover:text-blue-800 flex items-center gap-1.5 transition-colors cursor-pointer group"
             >
-              Full 8-channel view <ArrowRight className="w-3 h-3" />
-            </button>
+              <span>Signal Streams</span>
+              <ArrowRight className="w-3.5 h-3.5 transition-transform duration-200 group-hover:translate-x-0.5" />
+            </Link>
           </div>
 
-          <div className="h-48 chart-container p-3">
-            {recentWaveforms.length > 0 ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={recentWaveforms} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="hrGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#38bdf8" stopOpacity={0.3} />
-                      <stop offset="95%" stopColor="#38bdf8" stopOpacity={0} />
-                    </linearGradient>
-                    <linearGradient id="ppgGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
-                      <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#1c2d5a" />
-                  <YAxis domain={['auto', 'auto']} stroke="#374151" tick={{ fontSize: 9, fill: '#64748b' }} />
-                  <Tooltip
-                    contentStyle={{ backgroundColor: '#0d1527', borderColor: '#1c2d5a', fontSize: 11, fontFamily: 'JetBrains Mono, monospace' }}
-                    labelStyle={{ color: '#06b6d4' }}
-                  />
-                  <Area type="monotone" dataKey="rawPPG" name="Raw IR PPG" stroke="#10b981" fill="url(#ppgGrad)" strokeWidth={1.5} dot={false} isAnimationActive={false} />
-                  <Area type="monotone" dataKey="heartRate" name="Heart Rate (BPM)" stroke="#38bdf8" fill="url(#hrGrad)" strokeWidth={1.5} dot={false} isAnimationActive={false} />
-                </AreaChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="h-full flex flex-col items-center justify-center space-y-2 text-slate-500 font-sans">
-                <Activity className="w-8 h-8 text-slate-600 animate-pulse" />
-                <span className="text-xs font-mono font-semibold">WAITING FOR ESP32 TELEMETRY STREAM</span>
-                <span className="text-[10px] text-slate-600 font-mono">Connect ESP32 hardware via USB Serial above</span>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+            {/* Heart Rate */}
+            <div className="p-4 rounded-xl bg-slate-50/80 border border-slate-200/80 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-slate-600 flex items-center gap-1.5">
+                  <Heart className="w-3.5 h-3.5 text-rose-500" />
+                  <span>Heart Rate</span>
+                </span>
+                <SignalQualityBadge quality={vitals.signalQuality} showLabel={false} />
               </div>
-            )}
+              <div className="flex items-baseline gap-2">
+                <span className="text-3xl font-semibold text-[#172033] font-mono tabular-nums">
+                  {vitals.heartRate !== null ? vitals.heartRate.toFixed(0) : '—'}
+                </span>
+                <span className="text-xs text-slate-500 font-sans">BPM</span>
+              </div>
+              <div className="text-[11px] font-mono text-slate-500 pt-2 border-t border-slate-200/60 flex items-center justify-between">
+                <span>MAX30102 FIFO 50Hz</span>
+                <span className="text-[10px] text-slate-500 font-semibold">{vitals.signalQuality}</span>
+              </div>
+            </div>
+
+            {/* SpO2 Saturation */}
+            <div className="p-4 rounded-xl bg-slate-50/80 border border-slate-200/80 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-slate-600 flex items-center gap-1.5">
+                  <Droplets className="w-3.5 h-3.5 text-blue-600" />
+                  <span>SpO₂ Saturation</span>
+                </span>
+                <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 font-semibold">
+                  Uncalibrated
+                </span>
+              </div>
+              <div className="flex items-baseline gap-2">
+                <span className="text-3xl font-semibold text-blue-700 font-mono tabular-nums">
+                  {vitals.spo2 !== null ? vitals.spo2.toFixed(0) : '—'}
+                </span>
+                <span className="text-xs text-slate-500 font-sans">%</span>
+              </div>
+              <div className="text-[11px] font-mono text-slate-500 pt-2 border-t border-slate-200/60 flex items-center justify-between">
+                <span>Red/IR Ratio Metric</span>
+                <span className="text-[10px] text-slate-500 font-semibold">Optical PPG</span>
+              </div>
+            </div>
           </div>
 
-          <div className="flex items-center gap-4 text-[10px] font-mono text-slate-400">
-            <div className="flex items-center gap-1.5"><span className="w-3 h-0.5 bg-emerald-400 inline-block" /> Raw IR PPG</div>
-            <div className="flex items-center gap-1.5"><span className="w-3 h-0.5 bg-sky-400 inline-block" /> Heart Rate (BPM)</div>
-            <span className="ml-auto">{recentWaveforms.length > 0 ? `Latest ${recentWaveforms.length} samples` : '0 samples'}</span>
+          <div className="flex items-center justify-between text-xs font-mono text-slate-500 pt-1">
+            <span className="flex items-center gap-1.5">
+              <Clock className="w-3.5 h-3.5 text-slate-400" />
+              Stream Latency: <strong className="text-slate-700">{vitals.dataAgeSeconds > 0 ? `${vitals.dataAgeSeconds.toFixed(1)}s` : 'Real-time'}</strong>
+            </span>
+            <span>Non-clinical research evaluation</span>
           </div>
-        </SpotlightCard>
+        </div>
+
+        {/* 03. Actuator State & Safety Strip (5 Columns) */}
+        <div className="lg:col-span-5 bg-white border border-slate-200 rounded-xl p-6 shadow-[0_1px_2px_rgba(0,0,0,0.03)] space-y-5">
+          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+            <div className="flex items-center gap-2.5">
+              <Gauge className="w-4 h-4 text-blue-600" />
+              <h2 className="text-xs font-semibold text-[#172033] uppercase tracking-wider">
+                Actuator Drivers
+              </h2>
+            </div>
+            <Link
+              to="/environment"
+              className="text-xs font-medium text-blue-600 hover:text-blue-800 flex items-center gap-1.5 transition-colors cursor-pointer group"
+            >
+              <span>Controls</span>
+              <ArrowRight className="w-3.5 h-3.5 transition-transform duration-200 group-hover:translate-x-0.5" />
+            </Link>
+          </div>
+
+          <div className="space-y-3">
+            {/* Circulation Fan */}
+            <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-lg bg-white border border-slate-200 flex items-center justify-center text-slate-600">
+                  <Fan className="w-4 h-4" />
+                </div>
+                <div>
+                  <span className="text-xs font-medium text-slate-800 block">Circulation Fan</span>
+                  <span className="text-[10px] font-mono text-slate-500">Chamber Air Flow</span>
+                </div>
+              </div>
+              <span className={`px-2.5 py-1 rounded text-xs font-mono font-semibold ${
+                thermal.fanCommand === 'HIGH' || thermal.fanCommand === 'LOW'
+                  ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                  : 'bg-slate-200/60 text-slate-600'
+              }`}>
+                {thermal.fanCommand}
+              </span>
+            </div>
+
+            {/* Thermal Actuator Stage */}
+            <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-lg bg-white border border-slate-200 flex items-center justify-center text-slate-600">
+                  <Thermometer className="w-4 h-4" />
+                </div>
+                <div>
+                  <span className="text-xs font-medium text-slate-800 block">Thermal Actuator</span>
+                  <span className="text-[10px] font-mono text-slate-500">Peltier / Heat Stage</span>
+                </div>
+              </div>
+              <span className={`px-2.5 py-1 rounded text-xs font-mono font-semibold ${
+                thermal.peltierCommand === 'HEATING'
+                  ? 'bg-amber-50 text-amber-800 border border-amber-200'
+                  : thermal.peltierCommand === 'COOLING'
+                  ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                  : 'bg-slate-200/60 text-slate-600'
+              }`}>
+                {thermal.peltierCommand}
+              </span>
+            </div>
+          </div>
+
+          <div className="p-3 rounded-lg bg-slate-50 border border-slate-200/60 text-xs font-mono text-slate-600 flex items-center justify-between">
+            <span>Safety Interlock:</span>
+            <span className="font-semibold text-emerald-800 flex items-center gap-1.5">
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+              {thermal.hardwareSafetyStatus}
+            </span>
+          </div>
+        </div>
+
       </div>
 
-      {/* ─── ROW 3: Alert feed + Thermal overview ─────────────────── */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+      {/* ─── 04 & 05: RECENT EVENTS & HARDWARE DIAGNOSTICS (2-Column Workspace) ─── */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
 
-        {/* Recent Alerts */}
-        <SpotlightCard glowColor="amber" className="p-5 space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4 text-amber-400" />
-              <span className="text-sm font-sans font-bold text-slate-200">Recent Alerts</span>
+        {/* 04. Recent Event Candidates (7 Columns) */}
+        <div className="lg:col-span-7 bg-white border border-slate-200 rounded-xl p-6 shadow-[0_1px_2px_rgba(0,0,0,0.03)] space-y-4">
+          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+            <div className="flex items-center gap-2.5">
+              <ShieldAlert className="w-4 h-4 text-blue-600" />
+              <h2 className="text-xs font-semibold text-[#172033] uppercase tracking-wider">
+                Recent Incident Records
+              </h2>
             </div>
-            <button
-              onClick={() => setActiveTab('alerts')}
-              className="text-xs font-mono text-amber-400 hover:text-amber-300 flex items-center gap-1 transition-colors cursor-pointer"
+            <Link
+              to="/event-review"
+              className="text-xs font-medium text-blue-600 hover:text-blue-800 flex items-center gap-1.5 transition-colors cursor-pointer group"
             >
-              All alerts <ArrowRight className="w-3 h-3" />
-            </button>
+              <span>Triage Inbox ({unackCount})</span>
+              <ArrowRight className="w-3.5 h-3.5 transition-transform duration-200 group-hover:translate-x-0.5" />
+            </Link>
           </div>
 
           {recentAlerts.length === 0 ? (
-            <div className="text-center py-8 text-slate-500 text-xs font-mono">
-              NO ACTIVE ALERTS
+            <div className="py-8 text-center text-xs text-slate-500 font-sans">
+              No recent incident records logged in this session.
             </div>
           ) : (
-            <div className="divide-y divide-line-0">
+            <div className="space-y-2">
               {recentAlerts.map(alert => (
-                <button
+                <div
                   key={alert.id}
-                  onClick={() => setSelectedEvent(alert)}
-                  className="w-full flex items-center gap-3 py-2.5 text-left hover:bg-surface-2 rounded transition-colors px-1 group cursor-pointer"
+                  className="p-3 rounded-lg bg-slate-50 hover:bg-slate-100/80 border border-slate-200 transition-colors flex items-center justify-between gap-4"
                 >
-                  <span className={`w-2 h-2 rounded-full flex-shrink-0 ${
-                    alert.severity === 'CRITICAL' ? 'bg-rose-400 animate-pulse' :
-                    alert.severity === 'WARNING'  ? 'bg-amber-400' : 'bg-cyan-400'
-                  }`} />
-                  <div className="flex-1 min-w-0">
-                    <div className="text-xs font-sans font-semibold text-slate-200 truncate">{alert.type}</div>
-                    <div className="text-[10px] font-mono text-slate-400">{alert.timestamp} · {alert.id}</div>
+                  <div className="flex items-center gap-3 min-w-0">
+                    <span className={`w-2 h-2 rounded-full shrink-0 ${
+                      alert.severity === 'CRITICAL' ? 'bg-rose-500 animate-pulse' :
+                      alert.severity === 'WARNING' ? 'bg-amber-500' : 'bg-blue-500'
+                    }`} />
+                    <div className="truncate">
+                      <span className="text-xs font-semibold text-[#172033] block truncate">
+                        {alert.type}
+                      </span>
+                      <span className="text-[11px] text-slate-500 font-sans truncate block">
+                        {alert.evidenceSummary}
+                      </span>
+                    </div>
                   </div>
-                  <span className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded flex-shrink-0 ${
-                    alert.acknowledged ? 'text-slate-500 bg-slate-900' : 'text-rose-400 bg-rose-950/60'
-                  }`}>
-                    {alert.acknowledged ? 'ACK' : 'NEW'}
-                  </span>
-                </button>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="text-[10px] font-mono text-slate-400">
+                      {alert.timestamp.split('T')[1]?.split('.')[0] || alert.timestamp}
+                    </span>
+                    <Link
+                      to="/event-review"
+                      className="px-2 py-1 bg-white hover:bg-blue-50 text-blue-700 border border-slate-200 rounded text-[11px] font-medium transition-colors"
+                    >
+                      Review
+                    </Link>
+                  </div>
+                </div>
               ))}
             </div>
           )}
-        </SpotlightCard>
+        </div>
 
-        {/* Thermal overview */}
-        <SpotlightCard glowColor="amber" className="p-5 space-y-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Thermometer className="w-4 h-4 text-amber-400" />
-              <span className="text-sm font-sans font-bold text-slate-200">Thermal Micro-Climate</span>
+        {/* 05. System Health Summary (5 Columns) */}
+        <div className="lg:col-span-5 bg-white border border-slate-200 rounded-xl p-6 shadow-[0_1px_2px_rgba(0,0,0,0.03)] space-y-4">
+          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+            <div className="flex items-center gap-2.5">
+              <Cpu className="w-4 h-4 text-blue-600" />
+              <h2 className="text-xs font-semibold text-[#172033] uppercase tracking-wider">
+                Telemetry Diagnostics
+              </h2>
             </div>
-            <button
-              onClick={() => setActiveTab('thermal')}
-              className="text-xs font-mono text-amber-400 hover:text-amber-300 flex items-center gap-1 transition-colors cursor-pointer"
+            <Link
+              to="/device-health"
+              className="text-xs font-medium text-blue-600 hover:text-blue-800 flex items-center gap-1.5 transition-colors cursor-pointer group"
             >
-              Controls <ArrowRight className="w-3 h-3" />
-            </button>
+              <span>Diagnostics</span>
+              <ArrowRight className="w-3.5 h-3.5 transition-transform duration-200 group-hover:translate-x-0.5" />
+            </Link>
           </div>
 
-          <div className="grid grid-cols-2 gap-3 font-mono text-xs">
+          <div className="space-y-2.5 text-xs font-mono">
             {[
-              {
-                label: 'Chamber Temp',
-                value: thermal.chamberTemp !== null ? `${thermal.chamberTemp.toFixed(1)}°C` : '--',
-                status: thermal.chamberTemp !== null ? 'MEASURED' : 'WAITING',
-                color: thermal.chamberTemp !== null ? 'text-amber-300' : 'text-slate-500'
-              },
-              {
-                label: 'Target Temp',
-                value: `${thermal.targetTemp.toFixed(1)}°C`,
-                status: 'SETPOINT',
-                color: 'text-cyan-300'
-              },
-              {
-                label: 'Humidity',
-                value: thermal.humidity !== null ? `${thermal.humidity}%` : '--',
-                status: thermal.humidity !== null ? 'MEASURED' : 'WAITING',
-                color: thermal.humidity !== null ? 'text-teal-300' : 'text-slate-500'
-              },
-              {
-                label: 'Safety Interlock',
-                value: thermal.hardwareSafetyStatus,
-                status: 'HW RELAY',
-                color: thermal.hardwareSafetyStatus === 'READY' ? 'text-emerald-400' : 'text-slate-500'
-              },
+              { label: 'ESP32 Microcontroller', status: esp32.status, ok: esp32.online },
+              { label: 'MAX30102 Optical Sensor', status: max30102.status, ok: max30102.online },
+              { label: 'DS18B20 Temp Probe', status: ds18b20.status, ok: ds18b20.online },
+              { label: 'DHT11 Humidity Sensor', status: dht11.status, ok: dht11.online },
+              { label: 'Webcam Respiratory Flow', status: camera.status, ok: camera.online },
             ].map(item => (
-              <div key={item.label} className="bg-surface-0 border border-line-0 rounded-chip p-3 space-y-1">
-                <div className="text-[10px] text-slate-400 uppercase tracking-wider">{item.label}</div>
-                <div className={`text-lg font-extrabold tabular-nums ${item.color}`}>{item.value}</div>
-                <div className="text-[9px] text-slate-500">{item.status}</div>
+              <div key={item.label} className="flex items-center justify-between py-1.5 border-b border-slate-100 last:border-0">
+                <span className="text-slate-600 font-sans">{item.label}</span>
+                <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
+                  item.ok ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' : 'bg-slate-100 text-slate-500'
+                }`}>
+                  {item.status}
+                </span>
               </div>
             ))}
           </div>
 
-          {/* Peltier status */}
-          <div className="p-3 bg-surface-0 border border-line-0 rounded-chip">
-            <div className="flex items-center justify-between text-xs font-mono">
-              <span className="text-slate-400">Peltier Controller</span>
-              <span className={`font-bold ${
-                thermal.peltierCommand === 'HEATING' || thermal.peltierCommand === 'COOLING'
-                  ? 'text-emerald-400'
-                  : 'text-slate-400'
-              }`}>{thermal.peltierCommand}</span>
-            </div>
-            <div className="flex items-center justify-between text-xs font-mono mt-1">
-              <span className="text-slate-400">Fan State</span>
-              <span className="text-slate-300 font-semibold">{thermal.fanCommand}</span>
-            </div>
+          <div className="pt-2 flex items-center justify-between text-[11px] font-mono text-slate-500">
+            <span>Active Channels: <strong className="text-slate-800">{activeSensorsCount} / 5</strong></span>
+            <Link to="/device-health" className="text-blue-600 hover:underline">
+              Sensor Matrix →
+            </Link>
           </div>
-        </SpotlightCard>
+        </div>
+
       </div>
+      </>
+      )}
+
     </div>
   );
 };
+
+export default DashboardPage;

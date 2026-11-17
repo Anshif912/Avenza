@@ -12,6 +12,7 @@ import {
   SystemSettings,
   CameraRespiration,
   SignalSource,
+  SignalQuality,
   ReplayFrame
 } from '../types/avenza';
 import { ApneaFusionEngine } from '../services/ApneaFusionEngine';
@@ -25,11 +26,18 @@ import {
   SerialPortInfo
 } from '../services/WebSerialService';
 import { esp32WebSocketService } from '../services/ESP32WebSocketService';
+import {
+  esp32HttpService,
+  ESP32TelemetryData,
+  HttpConnectionState,
+  PrototypeEvent,
+  ESP32ControlCommand
+} from '../services/ESP32HttpService';
 import { AUTHORITATIVE_SOURCES } from '../data/clinicalReferences';
 
 /* ============================================================
    CLEAN LIVE HARDWARE INITIAL STATES
-   Real measured only — zero synthetic fallbacks
+   Real measured only: zero synthetic fallbacks
    ============================================================ */
 
 const LIVE_VITALS_INITIAL: VitalsTelemetry = {
@@ -42,15 +50,15 @@ const LIVE_VITALS_INITIAL: VitalsTelemetry = {
   humidity: null,
   thermalState: 'STABLE',
   signalQuality: 'POOR',
-  signalQualityReason: 'No live telemetry stream detected — click Connect ESP32',
+  signalQualityReason: 'No live telemetry stream detected: click Connect ESP32',
   timestamp: new Date().toISOString(),
   dataAgeSeconds: 0,
   isSynthetic: false
 };
 
 const LIVE_APNEA_INITIAL: ApneaTelemetry = {
-  state: 'NO_EVALUATION',
-  probability: 0,
+  state: 'WAITING_FOR_SIGNAL',
+  probability: null,
   eventDurationSeconds: 0,
   modelVersion: 'v2.4-multimodal-live',
   inferenceLatencyMs: 0,
@@ -88,8 +96,8 @@ const LIVE_APNEA_INITIAL: ApneaTelemetry = {
     apneaProbability: 0,
     evidenceScore: 0,
     evidenceConfidence: 'LOW',
-    eventState: 'NO_EVALUATION',
-    reason: 'Waiting for valid hardware signals',
+    eventState: 'WAITING_FOR_SIGNAL',
+    reason: 'Waiting for valid sensor signals. Connect ESP32 optical probe or engage camera.',
     flaggedFeatures: [],
     clinicalReferenceContext: {
       population: 'GENERAL_NEONATAL',
@@ -118,7 +126,7 @@ const LIVE_APNEA_INITIAL: ApneaTelemetry = {
       apneaClinicalCriterion: {
         definitionText: 'Cessation of breathing ≥20 seconds OR shorter pause (<20s) with bradycardia (HR <100 BPM) or desaturation (SpO₂ ≤85%)',
         source: AUTHORITATIVE_SOURCES.AAP_AOP_GUIDELINE,
-        prototypeDiffText: 'AVENZA prototype uses a 10-second algorithmic temporal window (DETECTION_WINDOW_MS) for early multi-signal alerting.'
+        prototypeDiffText: 'NeoNattle prototype uses a 10-second algorithmic temporal window (DETECTION_WINDOW_MS) for early multi-signal alerting.'
       },
       singleChannelSafetyActive: false
     }
@@ -237,6 +245,7 @@ const defaultSettings: SystemSettings = {
 
 interface MonitoringContextType {
   mode: DataMode;
+  setMode: (mode: DataMode) => void;
   isDemoMode: boolean;
   activeTab: string;
   setActiveTab: (tab: string) => void;
@@ -258,6 +267,23 @@ interface MonitoringContextType {
   isSerialSupported: boolean;
   connectSerial: () => Promise<boolean>;
   disconnectSerial: () => Promise<void>;
+  telemetryFreshness: 'LIVE' | 'STALE' | 'DISCONNECTED';
+  lastTelemetryAt: number | null;
+  deviceId: string;
+  firmware: string;
+
+  // ESP32 Wi-Fi REST API Connection
+  httpStatus: HttpConnectionState;
+  httpStats: { packetsReceived: number; lastLatencyMs: number; lastUpdated: string | null; consecutiveFailures: number };
+  esp32BaseUrl: string;
+  setEsp32BaseUrl: (url: string) => void;
+  httpPollingInterval: number;
+  setHttpPollingInterval: (ms: number) => void;
+  startHttpPolling: () => void;
+  stopHttpPolling: () => void;
+  sendHttpControl: (cmd: ESP32ControlCommand) => Promise<any>;
+  prototypeEvents: PrototypeEvent[];
+  latestHttpTelemetry: ESP32TelemetryData | null;
 
   selectedEvent: AlertItem | null;
   setSelectedEvent: (alert: AlertItem | null) => void;
@@ -268,6 +294,7 @@ interface MonitoringContextType {
   acknowledgeAlert: (id: string) => void;
   
   updateThermalControls: (controls: Partial<ThermalHardwareState>) => void;
+  resetSafety: () => Promise<boolean>;
   updateSettings: (newSettings: Partial<SystemSettings>) => void;
   
   startSession: (customSubjectId?: string) => void;
@@ -280,8 +307,8 @@ interface MonitoringContextType {
 const MonitoringContext = createContext<MonitoringContextType | undefined>(undefined);
 
 export const MonitoringProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const mode: DataMode = 'LIVE';
-  const isDemoMode = false;
+  const [mode, setMode] = useState<DataMode>('LIVE');
+  const isDemoMode = mode === 'DEMO';
   const [activeTab, setActiveTab] = useState<string>('landing');
   const [selectedEvent, setSelectedEvent] = useState<AlertItem | null>(null);
   const [selectedReplayEvent, setSelectedReplayEvent] = useState<AlertItem | null>(null);
@@ -307,6 +334,66 @@ export const MonitoringProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     lastPacketTimestamp: 0,
     dataAgeMs: null as number | null
   });
+  const [telemetryFreshness, setTelemetryFreshness] = useState<'LIVE' | 'STALE' | 'DISCONNECTED'>('DISCONNECTED');
+  const [lastTelemetryAt, setLastTelemetryAt] = useState<number | null>(null);
+  const [deviceId, setDeviceId] = useState<string>('NEONATTLE_ESP32_01');
+  const [firmware, setFirmware] = useState<string>('1.2.0');
+
+  // ESP32 Wi-Fi REST API State
+  const [httpStatus, setHttpStatus] = useState<HttpConnectionState>(esp32HttpService.getState());
+  const [esp32BaseUrl, setEsp32BaseUrlState] = useState<string>(esp32HttpService.getBaseUrl());
+  const [httpPollingInterval, setHttpPollingIntervalState] = useState<number>(esp32HttpService.getPollingInterval());
+  const [httpStats, setHttpStats] = useState(esp32HttpService.getStats());
+  const [prototypeEvents, setPrototypeEvents] = useState<PrototypeEvent[]>([]);
+  const [latestHttpTelemetry, setLatestHttpTelemetry] = useState<ESP32TelemetryData | null>(null);
+
+  const setEsp32BaseUrl = (url: string) => {
+    esp32HttpService.setBaseUrl(url);
+    setEsp32BaseUrlState(esp32HttpService.getBaseUrl());
+  };
+
+  const setHttpPollingInterval = (ms: number) => {
+    esp32HttpService.setPollingInterval(ms);
+    setHttpPollingIntervalState(esp32HttpService.getPollingInterval());
+  };
+
+  const startHttpPolling = () => {
+    esp32HttpService.startPolling();
+  };
+
+  const stopHttpPolling = () => {
+    esp32HttpService.stopPolling();
+  };
+
+  const sendHttpControl = async (cmd: ESP32ControlCommand) => {
+    // If WebSerial is actively connected, bridge controls to USB Serial
+    if (webSerialService.getState() === 'CONNECTED') {
+      if (cmd.mode) {
+        await webSerialService.setModeCommand(cmd.mode);
+      }
+      if (cmd.fan !== undefined) {
+        await webSerialService.sendFanCommand(cmd.fan);
+      }
+      if (cmd.peltier !== undefined) {
+        await webSerialService.sendPeltierCommand(cmd.peltier ? 'HEATING' : 'OFF');
+      }
+      return { success: true, mode: cmd.mode, fan: cmd.fan, peltier: cmd.peltier };
+    }
+    return await esp32HttpService.sendControl(cmd);
+  };
+
+  const resetSafety = async (): Promise<boolean> => {
+    const success = await webSerialService.resetSafetyCommand();
+    if (success) {
+      setThermal(prev => ({
+        ...prev,
+        hardwareSafetyStatus: 'READY',
+        blockedReason: null,
+        interlockStatus: 'SATISFIED'
+      }));
+    }
+    return success;
+  };
 
   const isSerialSupported = webSerialService.isSupported();
 
@@ -329,31 +416,34 @@ export const MonitoringProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     const chamberT = (ds && ds.valid && ds.temperature !== null) ? ds.temperature : (dht && dht.valid && dht.temperature !== null) ? dht.temperature : null;
     const humVal = (dht && dht.valid && dht.humidity !== null) ? dht.humidity : null;
 
-    // REAL DATA PRIORITY:
-    // HR & SpO2 use real hardware values if valid; otherwise fallback to smooth physiological simulation.
-    // Temperature, humidity, chamber probe, raw IR/Red, camera, and actuators are ALWAYS 100% real.
-    const simValues = vitalSimulationEngine.nextValues();
+    // Track packet freshness and hardware metadata
+    const nowMs = Date.now();
+    setLastTelemetryAt(nowMs);
+    setTelemetryFreshness('LIVE');
+    if (packet.deviceId) setDeviceId(packet.deviceId);
+    if (packet.firmware) setFirmware(packet.firmware);
+
+    // LIVE MODE PURITY:
+    // Real hardware values ONLY. Do not manufacture HR or SpO2.
+    // If not detected or uncalibrated, explicitly leave as null.
     let hrVal: number | null = null;
     let hrSource: SignalSource = 'MEASURED';
-    if (ppg && ppg.heartRateValid && ppg.heartRate !== null && ppg.heartRate > 0) {
+    if (ppg && ppg.heartRateValid && typeof ppg.heartRate === 'number' && ppg.heartRate > 0) {
       hrVal = ppg.heartRate;
       hrSource = 'MEASURED';
-    } else {
-      hrVal = simValues.heartRate;
-      hrSource = 'SIMULATED';
     }
 
     let spo2Val: number | null = null;
     let spo2Source: SignalSource = 'MEASURED';
-    if (ppg && ppg.spo2Valid && ppg.spo2 !== null && ppg.spo2 > 0) {
+    if (ppg && ppg.spo2Valid && typeof ppg.spo2 === 'number' && ppg.spo2 > 0) {
       spo2Val = ppg.spo2;
       spo2Source = 'MEASURED';
-    } else {
-      spo2Val = simValues.spo2;
-      spo2Source = 'SIMULATED';
     }
 
-    // 1. Update Vitals (Explicit Channel Provenance)
+    // 1. Update Vitals (Explicit Channel Provenance - 100% Real from Hardware)
+    const hasPulse = ppg.heartRateValid && typeof ppg.heartRate === 'number' && ppg.heartRate > 0;
+    const hasSpo2 = ppg.spo2Valid && typeof ppg.spo2 === 'number' && ppg.spo2 > 0;
+
     setVitals({
       heartRate: hrVal,
       heartRateTrend: 'STABLE',
@@ -367,38 +457,53 @@ export const MonitoringProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       thermalState: act.peltierCommand === 'HEATING' ? 'HEATING' : act.peltierCommand === 'COOLING' ? 'COOLING' : act.safetyCutoff ? 'SAFETY_CUTOFF' : 'STABLE',
       signalQuality: ppg.contact ? (ppg.qualityRating || 'GOOD') : 'POOR',
       signalQualityReason: ppg.contact
-        ? (ppg.heartRateValid ? 'Optical pulse lock active (MEASURED)' : `Optical stream active · HR/SpO₂ ${hrSource}`)
-        : 'No probe contact detected',
+        ? (hasPulse ? `Pulse lock active (${ppg.heartRate?.toFixed(0)} BPM) · SpO₂: ${hasSpo2 ? ppg.spo2?.toFixed(0) + '%' : 'Estimating'}` : `Acquiring signal: ${ppg.invalidReason || 'Awaiting pulse'}`)
+        : `No probe contact detected (IR: ${ppg.ir?.toLocaleString() || 0})`,
       timestamp: new Date().toISOString(),
-      dataAgeSeconds: 0.2,
-      isSynthetic: hrSource === 'SIMULATED' || spo2Source === 'SIMULATED'
+      dataAgeSeconds: 0,
+      isSynthetic: false
     });
 
-    // 2. Update Thermal State (100% Real from ESP32)
+    // 2. Update Thermal State (100% Real from ESP32 with separated actual and commanded states)
     setThermal(prev => ({
       ...prev,
       chamberTemp: chamberT,
       humidity: humVal,
+      actualPeltier: act.peltierCommand,
+      actualFan: act.fanCommand ? 'HIGH' : 'OFF',
       peltierCommand: act.peltierCommand,
-      peltierPwm: act.peltierPwm,
       fanCommand: act.fanCommand ? 'HIGH' : 'OFF',
+      commandedPeltier: prev.commandedPeltier === 'PENDING' ? prev.commandedPeltier : act.peltierCommand,
+      commandedFan: prev.commandedFan === 'PENDING' ? prev.commandedFan : (act.fanCommand ? 'HIGH' : 'OFF'),
+      peltierPwm: act.peltierPwm,
       hardwareSafetyStatus: act.safetyCutoff ? 'CUTOFF_ACTIVE' : 'READY',
-      peltierDriverStatus: act.driverStatus
+      manualOverrideActive: Boolean((act as any)?.manualOverride),
+      peltierDriverStatus: act.driverStatus,
+      interlockStatus: (act.peltierCommand !== 'OFF' && !act.fanCommand) ? 'BLOCKED' : 'SATISFIED'
     }));
 
     // 3. Update Sensor Diagnostic Matrix
     setSensors(prev => prev.map(s => {
       if (s.id === 'max30102') {
+        const displayReading = hasPulse
+          ? `${ppg.heartRate?.toFixed(0)} BPM · ${hasSpo2 ? ppg.spo2?.toFixed(0) + '% SpO₂' : 'SpO₂ Estimating'}`
+          : ppg.contact
+          ? `Acquiring: ${ppg.invalidReason || 'ACQUIRING_PULSE'} (IR: ${ppg.ir?.toLocaleString()})`
+          : `No contact (IR: ${ppg.ir?.toLocaleString() || '0'})`;
+
         return {
           ...s,
           connectionStatus: ppg.connected ? (ppg.contact ? 'CONNECTED' : 'DEGRADED') : 'DISCONNECTED',
           signalQuality: ppg.contact ? ppg.qualityRating : 'POOR',
-          validity: ppg.connected ? 'VALID' : 'INVALID',
-          lastReading: ppg.heartRateValid && ppg.heartRate
-            ? `${ppg.heartRate.toFixed(0)} BPM [MEASURED] · SpO₂: Uncalibrated`
-            : ppg.contact
-            ? `Raw IR: ${ppg.ir} (HR: ${hrVal?.toFixed(0)} BPM · SpO₂: ${spo2Val?.toFixed(0)}% [${hrSource}])`
-            : `Raw IR: ${ppg.ir}`
+          validity: hasPulse ? 'VALID' : 'WAITING',
+          lastReading: displayReading,
+          faultStatus: ppg.contact
+            ? (hasPulse ? 'Optical pulse lock active' : `Acquiring signal: ${ppg.invalidReason || 'Awaiting stable pulse'}`)
+            : 'Place finger gently on MAX30102 optical sensor',
+          invalidReason: ppg.invalidReason,
+          bpmCandidate: ppg.bpmCandidate,
+          spo2Candidate: ppg.spo2Candidate,
+          sampleCount: ppg.sampleCount
         };
       }
       if (s.id === 'dht11') {
@@ -429,33 +534,39 @@ export const MonitoringProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       return s;
     }));
 
-    // 4. Multimodal Fusion Evaluation (Camera + Real/Fallback Channels)
+    // 4. Multimodal Fusion Evaluation (Camera + Real Telemetry Channels)
     const cam = latestCameraRef.current;
+    const packetTime = packet.timestampMs || packet.timestamp || Date.now();
+    const packetAgeMs = Math.max(0, Date.now() - packetTime);
+
     const fusionInput = {
       spo2: {
         value: spo2Val,
-        timestamp: Date.now(),
-        ageMs: 200,
-        quality: ppg.contact ? (ppg.qualityRating || 'GOOD') : 'POOR',
-        valid: spo2Val !== null,
-        source: spo2Source
+        timestamp: packetTime,
+        ageMs: packetAgeMs,
+        quality: (ppg.contact ? (ppg.spo2Valid ? 'GOOD' : 'FAIR') : 'POOR') as SignalQuality,
+        valid: Boolean(ppg.spo2Valid && spo2Val !== null),
+        source: spo2Source,
+        reason: ppg.spo2Reason || (ppg.spo2Valid ? 'VALID' : ppg.contact ? 'ACQUIRING' : 'NO_CONTACT')
       },
       heartRate: {
         value: hrVal,
-        timestamp: Date.now(),
-        ageMs: 200,
-        quality: ppg.contact ? (ppg.qualityRating || 'GOOD') : 'POOR',
-        valid: hrVal !== null,
-        source: hrSource
+        timestamp: packetTime,
+        ageMs: packetAgeMs,
+        quality: (ppg.contact ? (ppg.heartRateValid ? 'GOOD' : 'FAIR') : 'POOR') as SignalQuality,
+        valid: Boolean(ppg.heartRateValid && hrVal !== null),
+        source: hrSource,
+        reason: ppg.heartRateReason || (ppg.heartRateValid ? 'LOCKED' : ppg.contact ? 'ACQUIRING' : 'NO_CONTACT')
       },
       camera: {
         movementAmplitude: cam?.movementAmplitude ?? null,
         timestamp: cam?.timestamp ?? Date.now(),
-        ageMs: cam ? cam.ageMs : 5000,
+        ageMs: cam ? Math.max(0, Date.now() - cam.timestamp) : 5000,
         quality: cam?.signalQuality ?? 'POOR',
         trackingStatus: cam?.trackingStatus ?? 'NOT_STARTED',
-        valid: cam?.movementAmplitude !== null && cam?.movementAmplitude !== undefined,
-        source: 'DERIVED' as const
+        valid: Boolean(cam && cam.movementAmplitude !== null && cam.trackingStatus === 'LOCKED'),
+        source: 'DERIVED' as const,
+        reason: cam?.signalQualityReason || (cam?.trackingStatus === 'LOCKED' ? 'LOCKED' : 'NOT_STARTED')
       },
       chamberTemp: chamberT,
       config: {
@@ -476,8 +587,8 @@ export const MonitoringProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
     setApnea({
       state: evidence.eventState,
-      probability: evidence.apneaProbability,
-      eventDurationSeconds: 0,
+      probability: evidence.prototypeApneaScore,
+      eventDurationSeconds: liveFusionEngineRef.current.getEventDurationSec(),
       modelVersion: 'v2.4-multimodal-live',
       inferenceLatencyMs: 14,
       lastInferenceTimestamp: new Date().toLocaleTimeString(),
@@ -494,7 +605,7 @@ export const MonitoringProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         respirationWaveAmplitudePercent: (evidence.cameraEvidence.movementAmplitude ?? 0.5) * 100
       },
       multimodalEvidence: evidence,
-      isSynthetic: hrSource === 'SIMULATED' || spo2Source === 'SIMULATED'
+      isSynthetic: false
     });
 
     // 5. Waveform Buffer with Real Measured PPG
@@ -512,7 +623,7 @@ export const MonitoringProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       heartRate: hrVal,
       spo2: spo2Val,
       signalQuality: ppg.qualityRating || 'POOR',
-      isSynthetic: hrSource === 'SIMULATED' || spo2Source === 'SIMULATED'
+      isSynthetic: false
     };
 
     setWaveforms(prev => [...prev.slice(-119), newPoint]);
@@ -522,9 +633,9 @@ export const MonitoringProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       timestamp: Date.now(),
       timeOffsetSec: 0,
       heartRate: hrVal,
-      heartRateSource: hrSource === 'MEASURED' ? 'MEASURED' : 'SIMULATED',
+      heartRateSource: 'MEASURED',
       spo2: spo2Val,
-      spo2Source: spo2Source === 'MEASURED' ? 'MEASURED' : 'SIMULATED',
+      spo2Source: 'MEASURED',
       temperature: (dht && dht.valid) ? dht.temperature : null,
       humidity: humVal,
       chamberTemperature: (ds && ds.valid) ? ds.temperature : null,
@@ -846,7 +957,7 @@ export const MonitoringProvider: React.FC<{ children: React.ReactNode }> = ({ ch
               apneaClinicalCriterion: {
                 definitionText: 'Cessation of breathing ≥20 seconds OR shorter pause (<20s) with bradycardia (HR <100 BPM) or desaturation (SpO₂ ≤85%)',
                 source: AUTHORITATIVE_SOURCES.AAP_AOP_GUIDELINE,
-                prototypeDiffText: 'AVENZA prototype uses a 10-second algorithmic temporal window (DETECTION_WINDOW_MS) for early multi-signal alerting.'
+                prototypeDiffText: 'NeoNattle prototype uses a 10-second algorithmic temporal window (DETECTION_WINDOW_MS) for early multi-signal alerting.'
               },
               singleChannelSafetyActive: false
             }
@@ -927,6 +1038,9 @@ export const MonitoringProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
       if (state === 'DISCONNECTED') {
         setVitals(LIVE_VITALS_INITIAL);
+        setThermal(LIVE_THERMAL_INITIAL);
+        setLastTelemetryAt(null);
+        setTelemetryFreshness('DISCONNECTED');
       }
     });
 
@@ -968,13 +1082,67 @@ export const MonitoringProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       }));
     });
 
+    const unsubAck = webSerialService.onCommandAck((ack) => {
+      setThermal(prev => {
+        const updated = { ...prev };
+        updated.lastAckTimestamp = Date.now();
+        if (ack.reason) {
+          updated.blockedReason = ack.reason;
+        } else if (ack.accepted) {
+          updated.blockedReason = null;
+        }
+        if (ack.actualFan !== undefined) {
+          const fanState = ack.actualFan ? 'HIGH' : 'OFF';
+          updated.actualFan = fanState;
+          updated.fanCommand = fanState;
+          if (updated.commandedFan === 'PENDING') {
+            updated.commandedFan = fanState;
+          }
+        }
+        if (ack.actualPeltier !== undefined) {
+          const peltierState = ack.actualPeltier ? 'HEATING' : 'OFF';
+          updated.actualPeltier = peltierState;
+          updated.peltierCommand = peltierState;
+          if (updated.commandedPeltier === 'PENDING') {
+            updated.commandedPeltier = peltierState;
+          }
+        }
+        if (ack.safetyInterlockActive !== undefined) {
+          updated.interlockStatus = ack.safetyInterlockActive ? 'BLOCKED' : 'SATISFIED';
+          if (ack.safetyInterlockActive) {
+            updated.hardwareSafetyStatus = 'CUTOFF_ACTIVE';
+          }
+        }
+        return updated;
+      });
+    });
+
     return () => {
       unsubState();
       unsubError();
       unsubTelemetry();
       unsubHealth();
+      unsubAck();
     };
   }, [settings]);
+
+  // Telemetry Freshness Watchdog (USB Serial Mode)
+  useEffect(() => {
+    const watchdog = setInterval(() => {
+      if (webSerialService.getState() === 'CONNECTED') {
+        const timeSince = lastTelemetryAt ? (Date.now() - lastTelemetryAt) : Infinity;
+        if (timeSince > 3500) {
+          setTelemetryFreshness('STALE');
+        } else {
+          setTelemetryFreshness('LIVE');
+        }
+      } else {
+        setTelemetryFreshness('DISCONNECTED');
+      }
+    }, 1000);
+
+    return () => clearInterval(watchdog);
+  }, [lastTelemetryAt]);
 
   // WebSocket Subscription to Python AI Backend
   useEffect(() => {
@@ -991,6 +1159,117 @@ export const MonitoringProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     };
   }, [settings.webSocketPort, settings.webSocketUrl]);
 
+  // ESP32 Wi-Fi REST API Subscription (Disabled in USB Serial Mode)
+  useEffect(() => {
+    // In USB-Serial mode, automatic REST polling is disabled to avoid network overhead or clobbering USB states
+    // esp32HttpService.startPolling();
+
+    const unsubState = esp32HttpService.onStateChange((state) => {
+      setHttpStatus(state);
+      setHttpStats(esp32HttpService.getStats());
+
+      setSensors(prev => prev.map(s => {
+        // Only update esp32 sensor status from HTTP if WebSerial is NOT connected
+        if (s.id === 'esp32' && webSerialService.getState() !== 'CONNECTED') {
+          return {
+            ...s,
+            connectionStatus: state === 'CONNECTED' ? 'CONNECTED' : state === 'DEGRADED' ? 'DEGRADED' : state === 'CONNECTING' ? 'WAITING' : 'DISCONNECTED',
+            faultStatus: state === 'CONNECTED'
+              ? `Wi-Fi REST API Active @ ${esp32HttpService.getBaseUrl()}`
+              : state === 'CONNECTING'
+              ? `Polling ${esp32HttpService.getBaseUrl()}...`
+              : 'USB Serial mode active (Wi-Fi offline)',
+            signalQuality: state === 'CONNECTED' ? 'GOOD' : 'POOR',
+            validity: state === 'CONNECTED' ? 'VALID' : 'WAITING'
+          };
+        }
+        return s;
+      }));
+    });
+
+    const unsubTelemetry = esp32HttpService.onTelemetry((data) => {
+      setLatestHttpTelemetry(data);
+      setHttpStats(esp32HttpService.getStats());
+
+      // Only update live vitals from HTTP if serial is not connected
+      if (webSerialService.getState() !== 'CONNECTED') {
+        const chamberT = data.sensors.temperature_probe ?? data.sensors.air_temperature;
+        const humVal = data.sensors.humidity;
+
+        setVitals(prev => ({
+          ...prev,
+          chamberTemp: chamberT,
+          humidity: humVal,
+          thermalState: data.actuators.peltier ? 'HEATING' : data.safety.emergency_cutoff_active ? 'SAFETY_CUTOFF' : 'STABLE',
+          signalQuality: data.sensors.max30102.contact ? 'GOOD' : 'POOR',
+          signalQualityReason: data.sensors.max30102.contact
+            ? `Optical contact active · Raw IR: ${data.sensors.max30102.raw_ir}`
+            : 'No optical probe contact detected',
+          timestamp: new Date().toISOString(),
+          dataAgeSeconds: 0.5,
+          isSynthetic: false
+        }));
+
+        setThermal(prev => ({
+          ...prev,
+          chamberTemp: chamberT,
+          humidity: humVal,
+          fanCommand: data.actuators.fan ? 'HIGH' : 'OFF',
+          peltierCommand: data.actuators.peltier ? 'HEATING' : 'OFF',
+          manualOverrideActive: data.mode === 'MANUAL',
+          hardwareSafetyStatus: data.safety.emergency_cutoff_active ? 'CUTOFF_ACTIVE' : 'READY',
+          peltierDriverStatus: data.actuators.driver_status
+        }));
+
+        setSensors(prev => prev.map(s => {
+          if (s.id === 'ds18b20') {
+            const valid = data.sensors.temperature_probe !== null;
+            return {
+              ...s,
+              connectionStatus: valid ? 'CONNECTED' : 'DISCONNECTED',
+              validity: valid ? 'VALID' : 'INVALID',
+              lastReading: valid ? `${data.sensors.temperature_probe?.toFixed(2)}°C` : 'Chamber probe disconnected'
+            };
+          }
+          if (s.id === 'dht11') {
+            const valid = data.sensors.air_temperature !== null;
+            return {
+              ...s,
+              connectionStatus: valid ? 'CONNECTED' : 'DISCONNECTED',
+              validity: valid ? 'VALID' : 'INVALID',
+              lastReading: valid ? `${data.sensors.air_temperature?.toFixed(1)}°C / ${data.sensors.humidity?.toFixed(0)}%` : 'Disconnected'
+            };
+          }
+          if (s.id === 'max30102') {
+            const available = data.sensors.max30102.available;
+            const contact = data.sensors.max30102.contact;
+            return {
+              ...s,
+              connectionStatus: available ? (contact ? 'CONNECTED' : 'DEGRADED') : 'DISCONNECTED',
+              validity: available ? 'VALID' : 'INVALID',
+              signalQuality: contact ? 'GOOD' : 'POOR',
+              lastReading: available
+                ? `Raw IR: ${data.sensors.max30102.raw_ir} · Red: ${data.sensors.max30102.raw_red} (Experimental)`
+                : 'Sensor not detected'
+            };
+          }
+          return s;
+        }));
+      }
+    });
+
+    const unsubEvent = esp32HttpService.onEvent((event) => {
+      setPrototypeEvents(prev => [event, ...prev.slice(0, 49)]); // Keep last 50 prototype events
+    });
+
+    return () => {
+      unsubState();
+      unsubTelemetry();
+      unsubEvent();
+      esp32HttpService.stopPolling();
+    };
+  }, [mode]);
+
   // Session elapsed counter for active sessions
   useEffect(() => {
     if (session.status !== 'ACTIVE') return undefined;
@@ -1006,6 +1285,73 @@ export const MonitoringProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
     return () => clearInterval(interval);
   }, [session.status]);
+
+  // Simulated Telemetry Loop when DEMO mode is enabled
+  useEffect(() => {
+    if (mode !== 'DEMO') {
+      if (serialStatus === 'DISCONNECTED') {
+        setVitals(LIVE_VITALS_INITIAL);
+      }
+      return undefined;
+    }
+
+    const interval = setInterval(() => {
+      const sim = vitalSimulationEngine.nextValues();
+      const now = new Date();
+      const chamberT = 36.8 + (Math.sin(Date.now() / 8000) * 0.2);
+      const humVal = 54 + Math.round(Math.cos(Date.now() / 10000) * 3);
+      
+      setVitals({
+        heartRate: sim.heartRate,
+        heartRateTrend: 'STABLE',
+        heartRateSource: 'SIMULATED',
+        spo2: sim.spo2,
+        spo2Trend: 'STABLE',
+        spo2Source: 'SIMULATED',
+        chamberTemp: chamberT,
+        targetTemp: 37.0,
+        humidity: humVal,
+        thermalState: 'STABLE',
+        signalQuality: 'GOOD',
+        signalQualityReason: 'Interactive DEMO simulation active',
+        timestamp: now.toISOString(),
+        dataAgeSeconds: 0.2,
+        isSynthetic: true
+      });
+
+      setThermal(prev => ({
+        ...prev,
+        chamberTemp: chamberT,
+        humidity: humVal,
+        peltierCommand: 'OFF',
+        fanCommand: 'LOW',
+        hardwareSafetyStatus: 'READY',
+        peltierDriverStatus: 'Demo Mode Active'
+      }));
+
+      // Add waveform point
+      const newPoint: WaveformPoint = {
+        timestamp: now.toLocaleTimeString(),
+        timeSec: Math.floor(Date.now() / 1000),
+        rawPPG: 45000 + Math.sin(Date.now() / 400) * 8000,
+        filteredPPG: 22000 + Math.sin(Date.now() / 400) * 4000,
+        respiratorySignal: 0.015 + Math.sin(Date.now() / 1200) * 0.008,
+        cameraMovement: 0.015 + Math.sin(Date.now() / 1200) * 0.008,
+        respiratoryMotionEst: 42,
+        aiProbability: 8,
+        cameraSignalQuality: 'GOOD',
+        respiratoryAvailable: true,
+        heartRate: sim.heartRate,
+        spo2: sim.spo2,
+        signalQuality: 'GOOD',
+        isSynthetic: true
+      };
+
+      setWaveforms(prev => [...prev.slice(-119), newPoint]);
+    }, 200);
+
+    return () => clearInterval(interval);
+  }, [mode, serialStatus]);
 
   const handleLiveCameraTelemetry = (telemetry: CameraRespiration) => {
     latestCameraRef.current = telemetry;
@@ -1029,9 +1375,21 @@ export const MonitoringProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   };
 
   const updateThermalControls = (controls: Partial<ThermalHardwareState>) => {
-    setThermal(prev => ({ ...prev, ...controls }));
+    setThermal(prev => ({
+      ...prev,
+      ...controls,
+      commandedFan: controls.fanCommand !== undefined ? controls.fanCommand : prev.commandedFan,
+      commandedPeltier: controls.peltierCommand !== undefined ? controls.peltierCommand : prev.commandedPeltier,
+      blockedReason: null
+    }));
     
-    // Transmit commands directly to ESP32 over Web Serial & Python AI Bridge
+    // Transmit commands directly to ESP32 over HTTP REST API, Web Serial & Python AI Bridge
+    if (controls.manualOverrideActive !== undefined) {
+      const modeStr = controls.manualOverrideActive ? 'MANUAL' : 'AUTO';
+      webSerialService.setModeCommand(modeStr);
+      esp32HttpService.sendControl({ mode: modeStr }).catch(() => {});
+    }
+
     if (controls.fanCommand !== undefined) {
       const fanOn = controls.fanCommand !== 'OFF';
       webSerialService.sendFanCommand(fanOn);
@@ -1071,6 +1429,7 @@ export const MonitoringProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     <MonitoringContext.Provider
       value={{
         mode,
+        setMode,
         isDemoMode,
         activeTab,
         setActiveTab,
@@ -1089,12 +1448,28 @@ export const MonitoringProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         isSerialSupported,
         connectSerial,
         disconnectSerial,
+        telemetryFreshness,
+        lastTelemetryAt,
+        deviceId,
+        firmware,
+        httpStatus,
+        httpStats,
+        esp32BaseUrl,
+        setEsp32BaseUrl,
+        httpPollingInterval,
+        setHttpPollingInterval,
+        startHttpPolling,
+        stopHttpPolling,
+        sendHttpControl,
+        prototypeEvents,
+        latestHttpTelemetry,
         selectedEvent,
         setSelectedEvent,
         selectedReplayEvent,
         setSelectedReplayEvent,
         acknowledgeAlert,
         updateThermalControls,
+        resetSafety,
         updateSettings,
         startSession,
         pauseSession,

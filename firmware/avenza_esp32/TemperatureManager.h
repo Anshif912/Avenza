@@ -161,6 +161,12 @@ public:
     return -999.0f;
   }
 
+  const char* getBestTemperatureSource() const {
+    if (ds18b20Valid && chamberTemperature > -50.0f) return "ds18b20";
+    if (dhtValid && dhtTemperature > 0.0f) return "dht11";
+    return "none";
+  }
+
   bool isAnyTempValid() const {
     return (ds18b20Valid && chamberTemperature > -50.0f) || (dhtValid && dhtTemperature > 0.0f);
   }

@@ -1,6 +1,6 @@
 /**
  * ============================================================================
- * AVENZA — VITAL SIMULATION ENGINE (PROTOTYPE FALLBACK)
+ * NEONATTLE: VITAL SIMULATION ENGINE (PROTOTYPE FALLBACK) · DEVELOPED BY AVENZA
  * ============================================================================
  * 
  * STRICT ARCHITECTURAL CONSTRAINTS:

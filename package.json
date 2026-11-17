@@ -8,13 +8,23 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "lint": "tsc --noEmit",
+    "test": "node tests/telemetry-parser.test.mjs && npx tsx tests/apnea-pipeline.test.ts",
+    "test:pipeline": "npx tsx tests/apnea-pipeline.test.ts",
+    "test:api": "node tests/esp32-api.test.mjs",
+    "mock:esp32": "node scripts/mock_esp32_server.js",
     "preview": "vite preview"
   },
   "dependencies": {
+    "@react-three/drei": "^9.122.0",
+    "@react-three/fiber": "^8.18.0",
+    "@types/three": "^0.169.0",
     "lucide-react": "^0.446.0",
+    "motion": "^13.5.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "recharts": "^2.12.7"
+    "react-router-dom": "^7.18.4",
+    "recharts": "^2.12.7",
+    "three": "^0.169.0"
   },
   "devDependencies": {
     "@types/node": "^22.5.4",

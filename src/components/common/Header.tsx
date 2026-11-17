@@ -1,21 +1,37 @@
 import React, { useState } from 'react';
+import { useLocation, Link } from 'react-router-dom';
 import { useMonitoring } from '../../context/MonitoringContext';
-import { ChevronRight, Usb, RefreshCw, XCircle, AlertTriangle } from 'lucide-react';
-import { AvenzaLogo } from './AvenzaLogo';
-import { ApneaStateBadge } from '../design-system/DesignSystemComponents';
+import { ChevronRight, Usb, RefreshCw, XCircle, AlertTriangle, Play, Radio, Cpu } from 'lucide-react';
+import { NeoNattleLogo } from './AvenzaLogo';
+
+const ROUTE_CONTEXTS: Record<string, { title: string; category?: string }> = {
+  '/dashboard':       { title: 'Command Center', category: 'Overview' },
+  '/live-monitoring': { title: 'Live Signal Streams', category: 'Monitoring' },
+  '/event-review':    { title: 'Event Triage & Review', category: 'Events' },
+  '/ai-apnea':        { title: 'AI Event Analysis', category: 'Evaluation' },
+  '/environment':     { title: 'Environmental Control', category: 'Actuation' },
+  '/device-health':   { title: 'Device & Sensor Health', category: 'Hardware' },
+  '/history':         { title: 'Event History Log', category: 'Audit' },
+  '/settings':        { title: 'System Configuration', category: 'Config' },
+  '/event-replay':    { title: 'Synchronized Event Replay', category: 'Studio' },
+  '/analytics':       { title: 'Signal Analytics', category: 'Reports' },
+  '/session':         { title: 'Session Controls', category: 'Active' },
+  '/session/setup':   { title: 'Session Configuration', category: 'Setup' },
+  '/login':           { title: 'Operator Access', category: 'Session' }
+};
 
 export const Header: React.FC = () => {
+  const location = useLocation();
   const {
-    session,
-    apnea,
-    activeTab,
-    setActiveTab,
+    mode,
+    setMode,
     serialStatus,
     serialStats,
     serialError,
     isSerialSupported,
     connectSerial,
-    disconnectSerial
+    disconnectSerial,
+    telemetryFreshness
   } = useMonitoring();
 
   const [connecting, setConnecting] = useState(false);
@@ -29,111 +45,140 @@ export const Header: React.FC = () => {
     }
   };
 
-  const formatDuration = (totalSeconds: number) => {
-    const hrs = Math.floor(totalSeconds / 3600);
-    const mins = Math.floor((totalSeconds % 3600) / 60);
-    const secs = totalSeconds % 60;
-    return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-  };
-
-  const tabLabels: Record<string, string> = {
-    landing: 'Overview & Introduction',
-    login: 'Operator Authentication',
-    sessionSetup: 'Patient Intake Setup',
-    dashboard: 'Telemetry Command Center',
-    aiApnea: 'Multimodal Apnea Evidence',
-    liveMonitoring: '8-Signal Live Waveforms',
-    alerts: 'Alerts & Clinical Triage',
-    eventHistory: 'Event History Audit Log',
-    eventReplay: 'Synchronized Event Replay',
-    analytics: 'Clinical Telemetry Analytics',
-    thermal: 'Thermal Micro-Climate',
-    sensorHealth: 'Hardware & Sensor Matrix',
-    session: 'Active Session Controls',
-    settings: 'Console Configuration'
-  };
-
   const isConnected = serialStatus === 'CONNECTED';
+  const currentContext = ROUTE_CONTEXTS[location.pathname] || {
+    title: location.pathname.replace('/', '').replace(/-/g, ' ') || 'Console',
+    category: 'Console'
+  };
 
   return (
-    <header className="bg-surface-1 border-b border-line-0 px-4 py-2.5 sticky top-0 z-30 shadow-card backdrop-blur-md">
-      <div className="flex flex-wrap items-center justify-between gap-3 max-w-7xl mx-auto">
+    <header className="bg-white border-b border-slate-200 px-6 py-3 sticky top-0 z-30 shadow-[0_1px_2px_rgba(0,0,0,0.03)] select-none">
+      <div className="flex items-center justify-between gap-4 max-w-7xl mx-auto">
         
-        {/* Brand & Breadcrumb Navigation */}
-        <div className="flex items-center space-x-3">
-          <button
-            onClick={() => setActiveTab('landing')}
-            className="flex items-center text-left group focus:outline-none cursor-pointer"
+        {/* Left: Brand mark & Clear Page Context */}
+        <div className="flex items-center space-x-4">
+          <Link
+            to="/dashboard"
+            className="flex items-center text-left focus:outline-none cursor-pointer group"
+            title="Return to Overview"
           >
-            <AvenzaLogo size="md" showBadge showTagline />
-          </button>
+            <NeoNattleLogo size="md" showBadge badgeText="PROTOTYPE" />
+          </Link>
 
-          {/* Breadcrumb current view */}
-          <div className="hidden xl:flex items-center space-x-1.5 text-xs font-mono text-slate-400 pl-3 border-l border-line-0">
-            <ChevronRight className="w-3.5 h-3.5 text-slate-600" />
-            <span className="text-cyan-300 font-semibold">{tabLabels[activeTab] || activeTab}</span>
-          </div>
-        </div>
+          <div className="h-5 w-px bg-slate-200" />
 
-        {/* Center Telemetry Snapshot / Session Badge */}
-        <div className="hidden lg:flex items-center space-x-3 bg-surface-0 px-3.5 py-1.5 rounded-xl border border-line-0 text-xs font-mono">
-          <div className="flex items-center space-x-1.5">
-            <span className="text-slate-400">Subject:</span>
-            <span className={`font-semibold ${session.subjectId ? 'text-cyan-300' : 'text-slate-500'}`}>
-              {session.subjectId || 'NO ACTIVE SESSION'}
-            </span>
-          </div>
-          <div className="h-3.5 w-px bg-line-0" />
-          <div className="flex items-center space-x-1.5">
-            <span className="text-slate-400">Duration:</span>
-            <span className={`font-semibold ${session.status === 'ACTIVE' ? 'text-emerald-400' : 'text-slate-500'}`}>
-              {session.status === 'ACTIVE' ? formatDuration(session.durationSeconds) : '--:--:--'}
-            </span>
-          </div>
-          <div className="h-3.5 w-px bg-line-0" />
-          <div className="flex items-center space-x-1.5">
-            <span className="text-slate-400">AI State:</span>
-            <ApneaStateBadge state={apnea.state} size="sm" />
-          </div>
-        </div>
-
-        {/* Right Action: Hardware Web Serial Quick-Connect Link */}
-        <div className="flex items-center space-x-2.5 font-mono text-xs">
-          {isConnected ? (
-            <div className="flex items-center gap-2 bg-emerald-950/60 border border-emerald-500/40 px-3 py-1.5 rounded-xl shadow-sm">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-              <span className="text-emerald-300 font-bold text-xs">ESP32 LIVE</span>
-              <span className="text-[10px] text-emerald-400/80 bg-emerald-900/60 px-1.5 py-0.5 rounded border border-emerald-500/30">
-                {serialStats.packetsReceived.toLocaleString()} pkts
+          {/* Breadcrumb / Current View title */}
+          <div className="flex items-center space-x-2 text-sm">
+            {currentContext.category && (
+              <span className="text-slate-400 text-xs font-normal hidden sm:inline">
+                {currentContext.category}
               </span>
+            )}
+            {currentContext.category && (
+              <ChevronRight className="w-3.5 h-3.5 text-slate-300 hidden sm:inline" />
+            )}
+            <span className="text-[#172033] font-semibold tracking-tight capitalize">
+              {currentContext.title}
+            </span>
+          </div>
+        </div>
+
+        {/* Right: Clean, uncrowded controls: Mode Toggle + ESP32 Status + Action */}
+        <div className="flex items-center space-x-3 text-xs">
+          
+          {/* Data Mode Switch (LIVE / DEMO) */}
+          <div className="flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200">
+            <button
+              onClick={() => setMode('LIVE')}
+              className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium transition-all cursor-pointer ${
+                mode === 'LIVE'
+                  ? 'bg-white text-blue-700 shadow-sm font-semibold'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+              title="Real-time telemetry from physical ESP32 via USB Web Serial"
+            >
+              <Radio className="w-3 h-3 text-blue-600" />
+              <span>LIVE</span>
+            </button>
+            <button
+              onClick={() => setMode('DEMO')}
+              className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium transition-all cursor-pointer ${
+                mode === 'DEMO'
+                  ? 'bg-white text-amber-800 shadow-sm font-semibold'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+              title="Demonstration simulation mode without physical hardware"
+            >
+              <Play className="w-3 h-3 text-amber-600" />
+              <span>DEMO</span>
+            </button>
+          </div>
+
+          {/* Hardware Connection Status Indicator */}
+          {isConnected ? (
+            <div className="flex items-center gap-2.5 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-lg">
+              <span className={`w-2 h-2 rounded-full ${telemetryFreshness === 'STALE' ? 'bg-amber-500' : 'bg-emerald-500 animate-pulse'}`} />
+              <div className="flex flex-col leading-tight">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-emerald-900 font-bold text-xs">ESP32 CONNECTED</span>
+                  <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded tracking-wide ${
+                    telemetryFreshness === 'STALE'
+                      ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                      : 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                  }`}>
+                    {telemetryFreshness === 'STALE' ? 'STALE' : 'LIVE'}
+                  </span>
+                </div>
+                <span className="text-[10px] font-mono text-emerald-700">
+                  USB SERIAL · 115200 · {serialStats.packetsReceived.toLocaleString()} pkts
+                </span>
+              </div>
               <button
                 onClick={disconnectSerial}
-                className="ml-1 text-slate-400 hover:text-rose-400 transition-colors p-0.5 cursor-pointer"
+                className="ml-1 text-slate-400 hover:text-red-600 transition-colors cursor-pointer"
                 title="Disconnect Serial"
               >
                 <XCircle className="w-3.5 h-3.5" />
               </button>
             </div>
           ) : serialStatus === 'CONNECTING' || connecting ? (
-            <div className="flex items-center gap-2 bg-amber-950/60 border border-amber-500/40 px-3 py-1.5 rounded-xl text-amber-300">
-              <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-400" />
-              <span className="font-bold text-xs">Selecting Port...</span>
+            <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 px-3 py-1.5 rounded-lg text-amber-800">
+              <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-600" />
+              <span className="font-semibold text-xs">CONNECTING...</span>
             </div>
           ) : (
-            <button
-              onClick={handleConnect}
-              disabled={!isSerialSupported}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 bg-medical-cyan hover:brightness-110 text-black font-extrabold font-sans text-xs rounded-xl transition-all shadow-md cursor-pointer disabled:opacity-50"
-              title={isSerialSupported ? "Connect ESP32 Hardware via Web Serial" : "Web Serial not supported in this browser"}
-            >
-              <Usb className="w-3.5 h-3.5" />
-              <span>CONNECT ESP32</span>
-            </button>
+            <div className="flex items-center gap-2">
+              {serialStats.packetsReceived > 0 && (
+                <span className="text-[11px] font-mono font-medium text-slate-500 bg-slate-100 border border-slate-200 px-2 py-1 rounded-md">
+                  ESP32 DISCONNECTED
+                </span>
+              )}
+              <button
+                onClick={handleConnect}
+                disabled={!isSerialSupported}
+                className="flex items-center gap-2 px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs rounded-lg transition-all shadow-sm active:scale-[0.98] cursor-pointer disabled:opacity-50"
+                title={isSerialSupported ? "Connect ESP32 Hardware via Web Serial (115200 baud)" : "Web Serial not supported in this browser"}
+              >
+                <Usb className="w-3.5 h-3.5" />
+                <span>CONNECT ESP32</span>
+              </button>
+            </div>
           )}
 
-          {/* Error Icon Indicator if any */}
+          {/* Device Health Shortcut Link */}
+          <Link
+            to="/device-health"
+            className={`p-1.5 rounded-lg border border-slate-200 text-slate-500 hover:text-slate-800 hover:bg-slate-50 transition-colors cursor-pointer ${
+              location.pathname === '/device-health' ? 'bg-blue-50 text-blue-700 border-blue-200' : ''
+            }`}
+            title="View Device & Sensor Matrix"
+          >
+            <Cpu className="w-4 h-4" />
+          </Link>
+
+          {/* Error Indicator if any */}
           {serialError && (
-            <div className="text-rose-400 hover:text-rose-300 cursor-pointer" title={serialError}>
+            <div className="text-red-600 hover:text-red-700 cursor-pointer" title={serialError}>
               <AlertTriangle className="w-4 h-4" />
             </div>
           )}
@@ -142,3 +187,5 @@ export const Header: React.FC = () => {
     </header>
   );
 };
+
+export default Header;

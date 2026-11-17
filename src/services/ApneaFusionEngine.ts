@@ -25,6 +25,7 @@ export interface ApneaFusionInput {
     quality: SignalQuality;
     valid: boolean;
     source: SignalSource;
+    reason?: string;
   };
   heartRate: {
     value: number | null;
@@ -33,6 +34,7 @@ export interface ApneaFusionInput {
     quality: SignalQuality;
     valid: boolean;
     source: SignalSource;
+    reason?: string;
   };
   camera: {
     movementAmplitude: number | null;
@@ -42,6 +44,7 @@ export interface ApneaFusionInput {
     trackingStatus: string;
     valid: boolean;
     source: SignalSource;
+    reason?: string;
   };
   chamberTemp?: number | null;
   config: {
@@ -61,6 +64,7 @@ export interface ApneaFusionInput {
 export class ApneaFusionEngine {
   private eventDurationBufferSec = 0;
   private currentEventState: AIApneaState = 'NORMAL';
+  private lastEvalTimestamp: number | null = null;
 
   // Rolling baseline estimates
   private hrBaseline = 138;
@@ -75,13 +79,21 @@ export class ApneaFusionEngine {
     heartRate: 0.25
   };
 
+  public getEventDurationSec(): number {
+    return Math.round(this.eventDurationBufferSec * 10) / 10;
+  }
+
+  public getCurrentState(): AIApneaState {
+    return this.currentEventState;
+  }
+
   public evaluate(input: ApneaFusionInput): MultimodalApneaEvidence {
     const {
       spo2,
       heartRate,
       camera,
       chamberTemp,
-      config
+      config = {}
     } = input;
 
     const selectedPop: ClinicalPopulation = config.selectedPopulation || 'GENERAL_NEONATAL';
@@ -98,9 +110,19 @@ export class ApneaFusionEngine {
     const spo2Fresh = spo2.ageMs <= maxSpo2Age;
     const hrFresh = heartRate.ageMs <= maxHrAge;
 
+    // Check cross-channel temporal skew
+    const channelAges = [
+      camera.valid ? camera.ageMs : null,
+      spo2.valid ? spo2.ageMs : null,
+      heartRate.valid ? heartRate.ageMs : null
+    ].filter((a): a is number => a !== null);
+    const maxSkewMs = channelAges.length > 1 ? Math.max(...channelAges) - Math.min(...channelAges) : 0;
+    const syncStatus: 'SYNCHRONIZED' | 'STALE' | 'DESYNCHRONIZED' =
+      maxSkewMs > 3500 ? 'DESYNCHRONIZED' : (!camFresh && !spo2Fresh && !hrFresh) ? 'STALE' : 'SYNCHRONIZED';
+
     const camValid = camera.valid && camFresh && camera.movementAmplitude !== null && camera.trackingStatus === 'LOCKED';
-    const spo2Valid = spo2.valid && spo2Fresh && spo2.quality !== 'POOR' && spo2.value !== null && spo2.value > 0;
-    const hrValid = heartRate.valid && hrFresh && heartRate.quality !== 'POOR' && heartRate.value !== null && heartRate.value > 0;
+    const spo2Valid = spo2.valid && spo2Fresh && spo2.quality !== 'POOR' && spo2.value !== null && spo2.value >= 70 && spo2.value <= 100;
+    const hrValid = heartRate.valid && hrFresh && heartRate.quality !== 'POOR' && heartRate.value !== null && heartRate.value >= 45 && heartRate.value <= 220;
 
     // 2. Baseline Management (Only adapt baselines during normal, non-event, fresh & valid data)
     const isNonEvent = this.currentEventState === 'NORMAL' || this.currentEventState === 'RECOVERED';
@@ -118,9 +140,9 @@ export class ApneaFusionEngine {
     }
 
     // 3. Signal Quality Shield Evaluation
-    const camQualityRating = !camValid ? 'POOR' : camera.quality;
-    const spo2QualityRating = !spo2Valid ? 'POOR' : spo2.quality;
-    const hrQualityRating = !hrValid ? 'POOR' : heartRate.quality;
+    const camQualityRating: SignalQuality = !camValid ? (camera.valid ? 'FAIR' : 'POOR') : camera.quality;
+    const spo2QualityRating: SignalQuality = !spo2Valid ? (spo2.valid ? 'FAIR' : 'POOR') : spo2.quality;
+    const hrQualityRating: SignalQuality = !hrValid ? (heartRate.valid ? 'FAIR' : 'POOR') : heartRate.quality;
 
     const camFreshnessState: 'FRESH' | 'STALE' | 'INVALID' = !camera.valid ? 'INVALID' : camFresh ? 'FRESH' : 'STALE';
     const spo2FreshnessState: 'FRESH' | 'STALE' | 'INVALID' = !spo2.valid ? 'INVALID' : spo2Fresh ? 'FRESH' : 'STALE';
@@ -135,16 +157,17 @@ export class ApneaFusionEngine {
     } else if (validChannelCount === 2) {
       shieldStatus = 'DEGRADED';
       shieldReason = !camValid
-        ? 'CAMERA EVIDENCE UNAVAILABLE (Webcam offline or ROI lost). Re-weighting physiological sensors.'
+        ? 'Camera motion evidence unavailable (Webcam offline or ROI lost). Re-weighting optical SpO₂ and pulse rate.'
         : !spo2Valid
-        ? 'SpO2 signal uncalibrated or unavailable. Re-weighting camera motion and pulse rate.'
-        : 'Heart rate telemetry degraded or stale. Re-weighting camera motion and SpO2.';
+        ? 'Optical SpO₂ uncalibrated or acquiring. Re-weighting camera motion and pulse rate.'
+        : 'Heart rate telemetry acquiring or stale. Re-weighting camera motion and SpO₂.';
     } else if (validChannelCount === 1) {
       shieldStatus = 'INSUFFICIENT';
-      shieldReason = 'INSUFFICIENT SIGNAL FOR APNEA EVALUATION (Multiple channels unavailable or uncalibrated)';
+      const activeChName = camValid ? 'Camera Thoracic Motion' : spo2Valid ? 'Optical SpO₂' : 'Pulse Telemetry';
+      shieldReason = `INSUFFICIENT EVIDENCE FOR EVALUATION: Single channel active (${activeChName}). Multi-modal corroboration required.`;
     } else {
       shieldStatus = 'INVALID';
-      shieldReason = 'NO VALID SIGNALS AVAILABLE (Sensors detached / streams stopped)';
+      shieldReason = 'NO VALID SIGNALS AVAILABLE: Connect ESP32 optical sensor or engage camera.';
     }
 
     // 4. Compute Physiological Deltas vs Rolling Baselines
@@ -210,16 +233,18 @@ export class ApneaFusionEngine {
     };
 
     let fusionScore = 0;
-    if (shieldStatus === 'INSUFFICIENT' || shieldStatus === 'INVALID') {
-      fusionScore = 0.05;
-    } else {
+    let prototypeApneaScore: number | null = null;
+
+    if (validChannelCount >= 2) {
       fusionScore =
         (camValid ? cameraScore * effectiveWeights.camera : 0) +
         (spo2Valid ? spo2Score * effectiveWeights.spo2 : 0) +
         (hrValid ? hrScore * effectiveWeights.heartRate : 0);
+      prototypeApneaScore = Math.min(99, Math.round(fusionScore * 100));
+    } else {
+      fusionScore = 0;
+      prototypeApneaScore = null; // Honest null when evidence is insufficient
     }
-
-    const prototypeApneaScore = Math.min(99, Math.round(fusionScore * 100));
 
     // 7. Single-Channel Safety Rule & Event State Machine
     const cameraEvidenceActive = camValid && cameraScore >= 0.50; // >= 50% drop in motion
@@ -228,26 +253,44 @@ export class ApneaFusionEngine {
     const activeEvidenceCount = [cameraEvidenceActive, spo2EvidenceActive, hrEvidenceActive].filter(Boolean).length;
     const singleChannelSafetyActive = activeEvidenceCount === 1;
 
-    if (shieldStatus === 'INSUFFICIENT' || shieldStatus === 'INVALID') {
-      this.currentEventState = 'INVALID_SIGNAL';
+    const prevState = this.currentEventState;
+    const currentTimestamp = Math.max(camera.timestamp, spo2.timestamp, heartRate.timestamp);
+    const dtSec = this.lastEvalTimestamp ? Math.min(2.0, Math.max(0.1, (currentTimestamp - this.lastEvalTimestamp) / 1000)) : 1.0;
+    this.lastEvalTimestamp = currentTimestamp;
+
+    if (validChannelCount === 0) {
+      if (spo2.reason === 'ACQUIRING' || heartRate.reason === 'ACQUIRING') {
+        this.currentEventState = 'SIGNAL_ACQUISITION';
+      } else {
+        this.currentEventState = 'WAITING_FOR_SIGNAL';
+      }
+      this.eventDurationBufferSec = 0;
+    } else if (validChannelCount === 1) {
+      this.currentEventState = 'INSUFFICIENT_EVIDENCE';
+      this.eventDurationBufferSec = 0;
+    } else if (syncStatus === 'DESYNCHRONIZED') {
+      this.currentEventState = 'WAITING_FOR_SIGNAL';
+      prototypeApneaScore = null;
       this.eventDurationBufferSec = 0;
     } else {
       const hasPrimaryEvidence = (camValid && cameraScore >= 0.65) || (spo2Valid && spo2Score >= 0.70);
+      const currentScore = prototypeApneaScore ?? 0;
 
       // Single-Channel Safety Rule:
       // Single channel anomaly CANNOT trigger CONFIRMED. Multi-channel corroboration (activeEvidenceCount >= 2) required.
-      if (prototypeApneaScore >= 80 && hasPrimaryEvidence && activeEvidenceCount >= 2) {
-        this.eventDurationBufferSec += 0.2;
+      if (currentScore >= 80 && hasPrimaryEvidence && activeEvidenceCount >= 2) {
+        this.eventDurationBufferSec += dtSec;
         if (this.eventDurationBufferSec >= confirmThresholdSec) {
           this.currentEventState = 'CONFIRMED';
         } else {
           this.currentEventState = 'SUSPECTED';
         }
-      } else if (prototypeApneaScore >= 50 && (hasPrimaryEvidence || activeEvidenceCount >= 1)) {
-        this.eventDurationBufferSec += 0.2;
+      } else if (currentScore >= 50 && (hasPrimaryEvidence || activeEvidenceCount >= 1)) {
+        this.eventDurationBufferSec += dtSec;
         this.currentEventState = 'SUSPECTED';
-      } else if (prototypeApneaScore >= 25 || (camValid && cameraDeltaPercent <= -40) || (spo2Valid && spo2Delta <= -2)) {
+      } else if (currentScore >= 25 || (camValid && cameraDeltaPercent <= -40) || (spo2Valid && spo2Delta <= -2)) {
         this.currentEventState = 'WATCH';
+        this.eventDurationBufferSec = 0;
       } else {
         if (this.currentEventState === 'CONFIRMED' || this.currentEventState === 'SUSPECTED') {
           this.currentEventState = 'RECOVERED';
@@ -335,7 +378,14 @@ export class ApneaFusionEngine {
       cameraQuality: camQualityRating,
       cameraFreshness: camFreshnessState,
       overallStatus: shieldStatus,
-      reason: shieldReason
+      reason: shieldReason,
+      channelDiagnostics: {
+        cameraReason: camera.reason || (camValid ? 'LOCKED' : camera.trackingStatus),
+        hrReason: heartRate.reason || (hrValid ? 'LOCKED' : hrFresh ? 'ACQUIRING' : 'STALE'),
+        spo2Reason: spo2.reason || (spo2Valid ? 'VALID' : spo2Fresh ? 'ACQUIRING' : 'STALE'),
+        syncStatus,
+        maxSkewMs
+      }
     };
 
     const baselines: RollingBaselines = {
@@ -353,8 +403,19 @@ export class ApneaFusionEngine {
         : 'Chest movement reduction + supporting physiological vitals changes detected';
     } else if (this.currentEventState === 'WATCH') {
       reasonSummary = 'Transient chest movement reduction observed; monitoring temporal window';
-    } else if (this.currentEventState === 'INVALID_SIGNAL') {
+    } else if (this.currentEventState === 'INSUFFICIENT_EVIDENCE') {
+      const activeChName = camValid ? 'Camera Thoracic Motion' : spo2Valid ? 'Optical SpO₂' : 'Pulse Telemetry';
+      reasonSummary = `${activeChName} active · Awaiting corroborating sensor channels for multimodal evaluation`;
+    } else if (this.currentEventState === 'SIGNAL_ACQUISITION') {
+      reasonSummary = 'Optical sensor contact active · Acquiring pulse lock and physiological baseline';
+    } else if (this.currentEventState === 'WAITING_FOR_SIGNAL') {
+      reasonSummary = 'Waiting for sensor stream connection · Connect USB hardware or engage camera';
+    } else if ((this.currentEventState as string) === 'INVALID_SIGNAL') {
       reasonSummary = shieldReason;
+    }
+
+    if (this.currentEventState !== prevState) {
+      console.log(`[NEONATTLE FUSION STATE] ${prevState} -> ${this.currentEventState} | Reason: ${reasonSummary} | Score: ${prototypeApneaScore ?? '--'}`);
     }
 
     const evidenceConfidence: 'HIGH' | 'MODERATE' | 'LOW' =
@@ -411,7 +472,7 @@ export class ApneaFusionEngine {
       apneaClinicalCriterion: {
         definitionText: 'Cessation of breathing ≥20 seconds OR shorter pause (<20s) with bradycardia (HR <100 BPM) or desaturation (SpO₂ ≤85%)',
         source: AUTHORITATIVE_SOURCES.AAP_AOP_GUIDELINE,
-        prototypeDiffText: 'AVENZA prototype uses a 10-second algorithmic temporal window (DETECTION_WINDOW_MS) for early multi-signal alerting, distinct from the ≥20s diagnostic guideline.'
+        prototypeDiffText: 'NeoNattle prototype uses a 10-second algorithmic temporal window (DETECTION_WINDOW_MS) for early multi-signal alerting, distinct from the ≥20s diagnostic guideline.'
       },
       singleChannelSafetyActive
     };
@@ -457,7 +518,7 @@ export class ApneaFusionEngine {
       shield,
       baselines,
       prototypeApneaScore,
-      apneaProbability: prototypeApneaScore,
+      apneaProbability: prototypeApneaScore ?? 0,
       evidenceScore: Math.round(fusionScore * 100) / 100,
       evidenceConfidence,
       eventState: this.currentEventState,

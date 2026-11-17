@@ -1,28 +1,33 @@
 /**
- * AVENZA — CENTRAL BRAND CONFIGURATION
- * Official brand identity, terminology, descriptors, and disclaimers.
+ * NeoNattle — CENTRAL BRAND CONFIGURATION
+ * Official brand identity, terminology, descriptors, and company attribution.
  */
 
 export const BRAND = {
-  name: 'AVENZA',
-  shortName: 'AVENZA',
-  tagline: 'Intelligent Neonatal Monitoring & AI-Assisted Apnea Event Detection',
-  descriptor: 'Intelligent Neonatal Monitoring & AI-Assisted Apnea Event Detection',
-  shortDescription: 'Multimodal neonatal monitoring and prototype apnea-event detection.',
-  prototypeLabel: 'AI-ASSISTED APNEA EVENT DETECTION — PROTOTYPE',
+  name: 'NeoNattle',
+  shortName: 'NeoNattle',
+  companyName: 'Avenza',
+  attribution: 'Developed by Avenza',
+  productCategory: 'Educational Neonatal Environment Monitoring & Apnea Research Prototype',
+  tagline: 'Intelligent Neonatal Monitoring & Environmental Research',
+  descriptor: 'Educational Neonatal Environment Monitoring & Apnea Research Prototype',
+  shortDescription: 'NeoNattle — Intelligent neonatal monitoring and environmental research prototype developed by Avenza.',
+  prototypeLabel: 'Educational Neonatal Monitoring & Apnea Research Prototype',
+  uiIdentity: 'NeoNattle — Developed by Avenza',
   version: 'v2.4-multimodal-lite',
-  build: '2026.09-PROTOTYPE',
-  organization: 'AVENZA Systems',
-  disclaimerText: 'AVENZA IS AN EDUCATIONAL / RESEARCH PROTOTYPE. PROTOTYPE APNEA SCORE IS AN EVIDENCE-DERIVED MODEL OUTPUT AND IS NOT A CLINICAL DIAGNOSIS. THIS SYSTEM IS NOT A SUBSTITUTE FOR A CLINICALLY VALIDATED MEDICAL MONITOR.',
-  shortDisclaimer: 'Prototype educational software. Model output is not a medical diagnosis.',
-  demoTag: 'AVENZA — SYNTHETIC DEMO',
-  liveTag: 'AVENZA — LIVE MONITORING',
+  build: '2026.10-PROTOTYPE',
+  organization: 'Avenza',
+  disclaimerText: 'NEONATTLE IS AN EDUCATIONAL AND RESEARCH PROTOTYPE DEVELOPED BY AVENZA. PROTOTYPE APNEA SCORE IS AN EVIDENCE-DERIVED MODEL OUTPUT AND IS NOT A CLINICAL DIAGNOSIS. THIS SYSTEM IS NOT A SUBSTITUTE FOR A CLINICALLY VALIDATED MEDICAL MONITOR.',
+  shortDisclaimer: 'NeoNattle is an educational research prototype developed by Avenza. Model output is not a medical diagnosis.',
+  demoTag: 'NeoNattle: Synthetic Demo',
+  liveTag: 'NeoNattle: Live Telemetry',
 } as const;
 
 export const APP_NAME = BRAND.name;
 export const APP_TAGLINE = BRAND.tagline;
 export const APP_DESCRIPTION = BRAND.shortDescription;
 export const PROTOTYPE_LABEL = BRAND.prototypeLabel;
+export const DEVELOPER_ATTRIBUTION = BRAND.attribution;
 
 export const STORAGE_KEYS = {
   SETTINGS: 'avenza_system_settings_v2',

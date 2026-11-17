@@ -95,7 +95,7 @@ export const AUTHORITATIVE_SOURCES = {
   },
   NELSON_PEDIATRICS: {
     organization: 'Nelson Textbook of Pediatrics',
-    title: 'Nelson Textbook of Pediatrics, 21st Edition — Normal Neonatal Vital Signs',
+    title: 'Nelson Textbook of Pediatrics, 21st Edition: Normal Neonatal Vital Signs',
     year: 2020,
     url: 'https://www.clinicalkey.com/#!/content/book/3-s2.0-B9780323529501001183',
     guidelineSection: 'Chapter 118: Assessment of the Newborn Infant',
@@ -209,7 +209,7 @@ export const CLINICAL_REFERENCE_DATABASE: ClinicalReferenceItem[] = [
     source: AUTHORITATIVE_SOURCES.WHO_NEWBORN_EXAM,
     clinicalContext: 'Counted over a full 60-second observation period in quiet state.',
     notes: 'Neonatal breathing is naturally irregular. Periodic breathing (pauses 3–10s followed by tachypneic bursts) can occur physiologically.',
-    limitations: 'AVENZA webcam measures camera-derived thoracic/abdominal motion evidence, not direct spirometric airflow. Label appropriately.',
+    limitations: 'NeoNattle webcam measures camera-derived thoracic/abdominal motion evidence, not direct spirometric airflow. Label appropriately.',
   },
   {
     id: 'REF_TEMP_WHO',
@@ -239,7 +239,7 @@ export const CLINICAL_REFERENCE_DATABASE: ClinicalReferenceItem[] = [
     source: AUTHORITATIVE_SOURCES.AAP_AOP_GUIDELINE,
     clinicalContext: 'Clinical definition of Apnea of Prematurity (AOP).',
     notes: 'Most events in preterm infants are mixed or obstructive, secondary to central brainstem immaturity and upper airway collapse.',
-    limitations: 'AVENZA prototype uses a 10-second algorithmic evidence accumulation window (DETECTION_WINDOW_MS) for early awareness, clearly distinguished from the ≥20s clinical guideline.',
+    limitations: 'NeoNattle prototype uses a 10-second algorithmic evidence accumulation window (DETECTION_WINDOW_MS) for early awareness, clearly distinguished from the ≥20s clinical guideline.',
   },
   {
     id: 'REF_SPO2_AAP',

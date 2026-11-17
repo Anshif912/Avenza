@@ -120,7 +120,7 @@ export class ESP32WebSocketService {
       this.ws.onopen = () => {
         this.reconnectAttempts = 0;
         this.updateState('CONNECTED');
-        console.log(`[AVENZA-WS] Connected to AI Backend & Telemetry Stream at ${this.url}`);
+        console.log(`[NEONATTLE-WS] Connected to AI Backend & Telemetry Stream at ${this.url}`);
       };
 
       this.ws.onmessage = (event) => {
@@ -130,7 +130,7 @@ export class ESP32WebSocketService {
             this.telemetryListeners.forEach(listener => listener(packet));
           }
         } catch (e) {
-          console.warn('[AVENZA-WS] Non-JSON payload received:', event.data);
+          console.warn('[NEONATTLE-WS] Non-JSON payload received:', event.data);
         }
       };
 
@@ -225,6 +225,12 @@ export class ESP32WebSocketService {
   private scheduleReconnect() {
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     this.reconnectAttempts++;
+    if (this.reconnectAttempts > 3) {
+      console.info('[NEONATTLE-WS] AI WebSocket server offline (port 8000). Reconnect paused to avoid console flooding.');
+      this.autoReconnect = false;
+      this.updateState('DISCONNECTED');
+      return;
+    }
     const delay = Math.min(1000 * Math.pow(1.5, this.reconnectAttempts), 10000);
     this.reconnectTimer = setTimeout(() => {
       if (this.autoReconnect) {

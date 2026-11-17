@@ -19,7 +19,17 @@ export type {
 export type SignalQuality = 'GOOD' | 'FAIR' | 'POOR';
 export type SignalValidity = 'VALID' | 'INVALID' | 'STALE';
 export type CameraTrackingState = 'LOCKED' | 'CALIBRATING' | 'LOST' | 'INVALID' | 'NOT_STARTED';
-export type AIApneaState = 'NORMAL' | 'WATCH' | 'SUSPECTED' | 'CONFIRMED' | 'RECOVERED' | 'INVALID_SIGNAL' | 'NO_EVALUATION';
+export type AIApneaState =
+  | 'WAITING_FOR_SIGNAL'
+  | 'SIGNAL_ACQUISITION'
+  | 'INSUFFICIENT_EVIDENCE'
+  | 'NORMAL'
+  | 'WATCH'
+  | 'SUSPECTED'
+  | 'CONFIRMED'
+  | 'RECOVERED'
+  | 'INVALID_SIGNAL'
+  | 'NO_EVALUATION';
 export type AlertSeverity = 'CRITICAL' | 'WARNING' | 'SENSOR' | 'RECOVERY';
 export type DataMode = 'LIVE' | 'DEMO';
 export type DataSourceMode = 'LIVE' | 'DEMO' | 'REAL_HARDWARE';
@@ -52,6 +62,13 @@ export interface SignalQualityShield {
   cameraFreshness: 'FRESH' | 'STALE' | 'INVALID';
   overallStatus: 'OPTIMAL' | 'DEGRADED' | 'INSUFFICIENT' | 'INVALID';
   reason?: string;
+  channelDiagnostics?: {
+    cameraReason?: string;
+    hrReason?: string;
+    spo2Reason?: string;
+    syncStatus?: 'SYNCHRONIZED' | 'STALE' | 'DESYNCHRONIZED';
+    maxSkewMs?: number;
+  };
 }
 
 export interface RollingBaselines {
@@ -242,7 +259,7 @@ export interface ContributingFeature {
 
 export interface ApneaTelemetry {
   state: AIApneaState;
-  probability: number; // 0 to 100 (Prototype Apnea Score)
+  probability: number | null; // 0 to 100 (Prototype Apnea Score) or null if no evaluation
   eventDurationSeconds: number;
   lastEventTimestamp?: string;
   modelVersion: string;
@@ -333,6 +350,14 @@ export interface ThermalHardwareState {
   hardwareSafetyStatus: 'READY' | 'CUTOFF_ACTIVE' | 'FAULT' | 'UNVERIFIED';
   manualOverrideActive: boolean;
   peltierDriverStatus: string;
+  // Separated Actuator States
+  commandedPeltier?: 'OFF' | 'HEATING' | 'COOLING' | 'PENDING';
+  actualPeltier?: 'OFF' | 'HEATING' | 'COOLING';
+  commandedFan?: 'OFF' | 'LOW' | 'MEDIUM' | 'HIGH' | 'MAX' | 'PENDING';
+  actualFan?: 'OFF' | 'HIGH';
+  interlockStatus?: 'SATISFIED' | 'BLOCKED';
+  blockedReason?: string | null;
+  lastAckTimestamp?: number | null;
 }
 
 export interface SensorDiagnosticItem {
@@ -347,6 +372,10 @@ export interface SensorDiagnosticItem {
   faultStatus: string;
   gpioPins?: string;
   i2cAddress?: string;
+  invalidReason?: string;
+  bpmCandidate?: number | null;
+  spo2Candidate?: number | null;
+  sampleCount?: number;
   cameraDetails?: {
     fps: number;
     roiStatus: string;

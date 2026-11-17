@@ -5,188 +5,308 @@
 #include "HardwareConfig.h"
 
 /* ============================================================
-   ACTUATOR & STATUS CONTROLLER
-   - Fan Relay (GPIO 18, Active LOW)
-   - Status LEDs (Red: 13, Yellow: 14, Green: 23)
-   - Peltier L298N (IN1: 25, IN2: 26, ENA: 27)
+   ACTUATOR & RELAY CONTROLLER WITH HARDWARE SAFETY INTERLOCKS
+   - Relay IN1 (Fan): GPIO 18 (Configurable Active-LOW / Active-HIGH)
+   - Relay IN2 (Peltier): GPIO 25 (Configurable Active-LOW / Active-HIGH)
+   - Diagnostic LEDs: Red (13), Yellow (14), Green (23)
+   - Heatsink Fan Interlock: Fan forced ON whenever Peltier is energized
+   - Break-before-make switching dead-time (100 ms)
+   - Manual command timeout failsafe (60s reverting to AUTO)
+   - Emergency thermal shutdown at >= 38.0°C
    ============================================================ */
 
-enum PeltierMode {
-  PELTIER_OFF,
-  PELTIER_HEATING,
-  PELTIER_COOLING
+enum SystemControlMode {
+  MODE_AUTO,
+  MODE_MANUAL
 };
 
 class ActuatorManager {
 public:
-  // Actuator states
-  bool fanCommand;
-  PeltierMode peltierCommand;
-  uint8_t peltierPwm;
-  bool safetyCutoffActive;
-  bool manualOverrideActive;
-  String driverStatus;
+  // Control Mode
+  SystemControlMode mode;
+  uint32_t lastManualCommandMs;
 
-  // Status LED states
+  // Actuator States
+  bool fanState;       // true = energized, false = de-energized
+  bool peltierState;   // true = energized, false = de-energized
+  bool safetyCutoffActive;
+  String driverStatus;
+  String fanReason;
+  String peltierReason;
+
+  // LED states
   bool ledRed;
   bool ledYellow;
   bool ledGreen;
 
 public:
   ActuatorManager()
-    : fanCommand(false), peltierCommand(PELTIER_OFF), peltierPwm(0),
-      safetyCutoffActive(false), manualOverrideActive(false), driverStatus("READY_OFF"),
-      ledRed(false), ledYellow(true), ledGreen(false) {}
+    : mode(MODE_AUTO),
+      lastManualCommandMs(0),
+      fanState(false),
+      peltierState(false),
+      safetyCutoffActive(false),
+      driverStatus("IDLE_OFF"),
+      fanReason("System initialization"),
+      peltierReason("System initialization"),
+      ledRed(false),
+      ledYellow(true),
+      ledGreen(false)
+  {}
 
-  bool begin() {
-    // 1. Configure Relay Pin (Safe OFF)
-    pinMode(RELAY_PIN, OUTPUT);
-    digitalWrite(RELAY_PIN, RELAY_ACTIVE_LOW ? HIGH : LOW);
-    fanCommand = false;
+  void begin() {
+    // 1. Initialize Relay Pins IMMEDIATELY to safe de-energized state
+    pinMode(RELAY_FAN_PIN, OUTPUT);
+    pinMode(RELAY_PELTIER_PIN, OUTPUT);
+    
+    // De-energize relays (respecting active-LOW vs active-HIGH)
+    writeRelayPin(RELAY_FAN_PIN, false);
+    writeRelayPin(RELAY_PELTIER_PIN, false);
+    fanState = false;
+    peltierState = false;
 
-    // 2. Configure Status LED Pins
+    // 2. Initialize Status LEDs
+    #if LEDS_ENABLED
     pinMode(LED_RED_PIN, OUTPUT);
     pinMode(LED_YELLOW_PIN, OUTPUT);
     pinMode(LED_GREEN_PIN, OUTPUT);
-    
-    // Initial state: YELLOW on while booting/initializing
-    setLeds(false, true, false);
+    setLeds(false, true, false); // Booting indication: Yellow ON
+    #endif
 
-    // 3. Configure L298N H-Bridge Pins (Safe OFF)
-    pinMode(PELTIER_ENA, OUTPUT);
-    digitalWrite(PELTIER_ENA, LOW);
-    pinMode(PELTIER_IN1, OUTPUT);
-    digitalWrite(PELTIER_IN1, LOW);
-    pinMode(PELTIER_IN2, OUTPUT);
-    digitalWrite(PELTIER_IN2, LOW);
-    
-    peltierCommand = PELTIER_OFF;
-    peltierPwm = 0;
-    safetyCutoffActive = false;
-    manualOverrideActive = false;
     driverStatus = "READY_OFF";
-    return true;
+    fanReason = "Standby";
+    peltierReason = "Standby";
+  }
+
+  // Low-level safe relay write with configurable polarity & serial logging
+  void writeRelayPin(uint8_t pin, bool energized) {
+    uint8_t level;
+    if (RELAY_ACTIVE_LOW) {
+      level = energized ? LOW : HIGH;
+    } else {
+      level = energized ? HIGH : LOW;
+    }
+    digitalWrite(pin, level);
+    Serial.print(F("[RELAY] GPIO "));
+    Serial.print(pin);
+    Serial.print(F(" write: "));
+    Serial.print(level == LOW ? F("LOW") : F("HIGH"));
+    Serial.print(F(" ("));
+    Serial.print(energized ? F("ENERGIZED") : F("DE-ENERGIZED"));
+    Serial.println(F(")"));
   }
 
   void setLeds(bool red, bool yellow, bool green) {
     ledRed = red;
     ledYellow = yellow;
     ledGreen = green;
-
+    #if LEDS_ENABLED
     digitalWrite(LED_RED_PIN, red ? HIGH : LOW);
     digitalWrite(LED_YELLOW_PIN, yellow ? HIGH : LOW);
     digitalWrite(LED_GREEN_PIN, green ? HIGH : LOW);
+    #endif
   }
 
-  void setFan(bool on) {
-    fanCommand = on;
-    if (RELAY_ACTIVE_LOW) {
-      digitalWrite(RELAY_PIN, on ? LOW : HIGH);
-    } else {
-      digitalWrite(RELAY_PIN, on ? HIGH : LOW);
-    }
+  // Sets fan with interlock verification and logging
+  void setFan(bool on, const char* reason = "Manual") {
+    Serial.print(F("[ACTION] FAN REQUEST "));
+    Serial.println(on ? F("ON") : F("OFF"));
+    fanState = on;
+    fanReason = reason;
+    writeRelayPin(RELAY_FAN_PIN, on);
+    Serial.print(F("[STATE] FAN = "));
+    Serial.println(on ? F("ON") : F("OFF"));
   }
 
-  void setPeltier(PeltierMode mode, uint8_t pwm = 180) {
-    if (safetyCutoffActive && mode != PELTIER_OFF) {
-      driverStatus = "SAFETY_CUTOFF";
-      return;
+  // Sets Peltier with interlock, break-before-make and diagnostic logging
+  bool setPeltier(bool on, const char* reason = "Manual") {
+    Serial.print(F("[ACTION] PELTIER REQUEST "));
+    Serial.println(on ? F("ON") : F("OFF"));
+    Serial.print(F("[SAFETY] CUTOFF = "));
+    Serial.println(safetyCutoffActive ? F("ACTIVE (BLOCKED)") : F("INACTIVE (OK)"));
+
+    if (safetyCutoffActive && on) {
+      driverStatus = "CUTOFF_ACTIVE";
+      peltierReason = "Blocked by thermal emergency cutoff (>= 38.0C)";
+      Serial.println(F("[SAFETY] Peltier blocked by safety cutoff!"));
+      return false;
     }
 
-    peltierCommand = mode;
-    peltierPwm = min(pwm, (uint8_t)PELTIER_MAX_SAFE_PWM);
-
-    switch (mode) {
-      case PELTIER_HEATING:
-        // Heating: IN1 HIGH, IN2 LOW, ENA PWM/HIGH
-        digitalWrite(PELTIER_IN1, HIGH);
-        digitalWrite(PELTIER_IN2, LOW);
-        analogWrite(PELTIER_ENA, peltierPwm);
-        driverStatus = "HEATING_ACTIVE";
-        break;
-
-      case PELTIER_COOLING:
-        // Cooling: IN1 LOW, IN2 HIGH, ENA PWM/HIGH (Reverse direction)
-        digitalWrite(PELTIER_IN1, LOW);
-        digitalWrite(PELTIER_IN2, HIGH);
-        analogWrite(PELTIER_ENA, peltierPwm);
-        driverStatus = "COOLING_ACTIVE";
-        break;
-
-      case PELTIER_OFF:
-      default:
-        digitalWrite(PELTIER_IN1, LOW);
-        digitalWrite(PELTIER_IN2, LOW);
-        analogWrite(PELTIER_ENA, 0);
-        digitalWrite(PELTIER_ENA, LOW);
-        peltierPwm = 0;
-        driverStatus = "READY_OFF";
-        break;
+    // Heatsink Fan Interlock:
+    // If Peltier is being energized and heatsink fan interlock is enabled,
+    // ensure fan is energized FIRST!
+    if (on && HEATSINK_FAN_INTERLOCK) {
+      if (!fanState) {
+        Serial.println(F("[SAFETY] FAN INTERLOCK = ENFORCING (Starting fan first)"));
+        setFan(true, "Heatsink fan forced ON for Peltier cooling");
+        delay(BREAK_BEFORE_MAKE_DELAY_MS); // Break-before-make settling delay
+      } else {
+        Serial.println(F("[SAFETY] FAN INTERLOCK = SATISFIED"));
+      }
     }
+
+    // Simultaneous lockout check:
+    if (on && SIMULTANEOUS_LOCKOUT && fanState) {
+      setFan(false, "Lockout: Fan stopped for Peltier heating");
+      delay(BREAK_BEFORE_MAKE_DELAY_MS);
+    }
+
+    peltierState = on;
+    peltierReason = reason;
+    writeRelayPin(RELAY_PELTIER_PIN, on);
+
+    driverStatus = on ? "PELTIER_ENERGIZED" : "PELTIER_IDLE";
+    Serial.print(F("[STATE] PELTIER = "));
+    Serial.println(on ? F("ON") : F("OFF"));
+    return true;
   }
 
-  // Autonomous Hysteresis Control according to specification
+  // Emergency safe shutdown: all actuators OFF
+  void emergencyShutdown(const char* reason) {
+    safetyCutoffActive = true;
+    peltierState = false;
+    writeRelayPin(RELAY_PELTIER_PIN, false);
+    // Keep fan ON to dissipate excess heat!
+    fanState = true;
+    writeRelayPin(RELAY_FAN_PIN, true);
+    driverStatus = "EMERGENCY_SHUTDOWN";
+    fanReason = "Emergency heat dissipation";
+    peltierReason = reason;
+    setLeds(true, false, false); // RED alarm
+  }
+
+  // Autonomous Incubator Hysteresis Control Loop
   void updateAutonomous(float currentTemp, bool isTempValid) {
-    // Check thermal emergency safety cutoff first
-    if (isTempValid && currentTemp >= THERMAL_SAFETY_CUTOFF) {
-      safetyCutoffActive = true;
-      setPeltier(PELTIER_OFF, 0);
-      setFan(true); // Maximum venting on thermal hazard
-      setLeds(true, false, false); // RED alarm
+    uint32_t now = millis();
+
+    // 1. Check Thermal Emergency Cutoff first (independent of mode)
+    if (isTempValid && currentTemp >= EMERGENCY_CUTOFF_TEMP_C) {
+      emergencyShutdown("Temperature >= 38.0°C hard cutoff");
       return;
-    } else if (safetyCutoffActive && isTempValid && currentTemp < (THERMAL_SAFETY_CUTOFF - 3.0f)) {
-      safetyCutoffActive = false;
+    } else if (safetyCutoffActive && isTempValid && currentTemp < (EMERGENCY_CUTOFF_TEMP_C - 2.0f)) {
+      safetyCutoffActive = false; // Auto-recovery once cooled
+      driverStatus = "READY_OFF";
     }
 
-    // 1. Status LEDs Control
+    // 2. Failsafe Manual Mode Timeout Check:
+    // If in MANUAL mode and timeout expired, revert to AUTO
+    if (mode == MODE_MANUAL) {
+      if (now - lastManualCommandMs > MANUAL_COMMAND_TIMEOUT_MS) {
+        mode = MODE_AUTO;
+        Serial.println(F("[SAFETY] Manual command timeout expired (60s). Reverted to AUTO."));
+      }
+    }
+
+    // 3. Status LED Management
     if (!isTempValid) {
-      // Invalid temperature -> YELLOW
-      setLeds(false, true, false);
-    } else if (currentTemp < LED_TEMP_WARN_THRESH) {
-      // Temperature < 29°C -> GREEN
-      setLeds(false, false, true);
-    } else if (currentTemp >= LED_TEMP_WARN_THRESH && currentTemp < LED_TEMP_CRIT_THRESH) {
-      // 29°C <= temperature < 30°C -> YELLOW
-      setLeds(false, true, false);
+      setLeds(false, true, false); // Sensor error / warming up -> Yellow
+    } else if (currentTemp >= FAN_ON_TEMP_THRESHOLD_C) {
+      setLeds(true, false, false); // Over threshold (>= 30.0°C) -> Red
+    } else if (currentTemp >= (FAN_ON_TEMP_THRESHOLD_C - 1.0f)) {
+      setLeds(false, true, false); // Close to threshold (29.0 - 29.9°C) -> Yellow
     } else {
-      // Temperature >= 30°C -> RED
-      setLeds(true, false, false);
+      setLeds(false, false, true); // Nominal (< 29.0°C) -> Green
     }
 
-    // If manual override is active, do not overwrite fan/peltier states
-    if (manualOverrideActive) return;
+    // 4. In MANUAL mode, skip automatic hysteresis logic
+    if (mode == MODE_MANUAL) {
+      return;
+    }
 
-    // 2. Fan Hysteresis Control
+    // 5. AUTO Mode Logic (Incubator Regulation Loop)
+    // If temperature sensor is invalid / unavailable:
+    // DO NOT automatically heat or cool based on invalid data! Revert to safe idle.
     if (!isTempValid) {
-      setFan(false);
-    } else if (currentTemp >= FAN_TEMP_ON_THRESH) {
-      // Temp >= 30°C -> Fan ON
-      setFan(true);
-    } else if (currentTemp <= FAN_TEMP_OFF_THRESH) {
-      // Temp <= 29°C -> Fan OFF
-      setFan(false);
+      if (peltierState) setPeltier(false, "Safe fallback: sensor invalid");
+      if (fanState) setFan(false, "Safe fallback: sensor invalid");
+      driverStatus = "SENSOR_INVALID_IDLE";
+      return;
     }
-    // Between 29°C and 30°C -> retain previous fan state
 
-    // 3. Peltier Prototype Heating Hysteresis Control
-    if (!isTempValid) {
-      setPeltier(PELTIER_OFF, 0);
-    } else if (currentTemp <= PELTIER_HEAT_ON_THRESH) {
-      // Temp <= 27°C -> Heating ON
-      setPeltier(PELTIER_HEATING, 180);
-    } else if (currentTemp >= PELTIER_HEAT_OFF_THRESH) {
-      // Temp >= 28°C -> Heating OFF
-      setPeltier(PELTIER_OFF, 0);
+    // A. Autonomous Heating Regulation:
+    // Turn Peltier ON at <= PELTIER_ON_TEMP_THRESHOLD_C (28.0°C)
+    // Turn Peltier OFF at >= PELTIER_OFF_TEMP_THRESHOLD_C (28.5°C)
+    if (currentTemp <= PELTIER_ON_TEMP_THRESHOLD_C) {
+      if (!peltierState) {
+        setPeltier(true, "Auto: Chamber temp below target setpoint");
+      }
+    } else if (currentTemp >= PELTIER_OFF_TEMP_THRESHOLD_C) {
+      if (peltierState) {
+        setPeltier(false, "Auto: Chamber temp reached target setpoint");
+      }
     }
-    // Between 27°C and 28°C -> retain previous state
+
+    // B. Autonomous Cooling Fan Regulation:
+    // Turn ON at >= 30.0°C, turn OFF at <= 29.5°C
+    if (currentTemp >= FAN_ON_TEMP_THRESHOLD_C) {
+      if (!fanState) {
+        setFan(true, "Auto: Temp >= 30.0°C threshold");
+      }
+    } else if (currentTemp <= FAN_OFF_TEMP_THRESHOLD_C) {
+      // Only turn fan OFF if Peltier does not require heatsink fan!
+      if (!peltierState || !HEATSINK_FAN_INTERLOCK) {
+        if (fanState) {
+          setFan(false, "Auto: Temp <= 29.5°C threshold");
+        }
+      }
+    }
   }
 
-  const char* getPeltierCommandString() const {
-    switch (peltierCommand) {
-      case PELTIER_HEATING: return "HEATING";
-      case PELTIER_COOLING: return "COOLING";
-      default: return "OFF";
+  // Handle validated manual control command from HTTP/Serial
+  bool applyControlCommand(const String& newMode, int fanCmd, int peltierCmd, String& outError) {
+    lastManualCommandMs = millis();
+
+    // Mode handling
+    if (newMode.length() > 0) {
+      String upper = newMode;
+      upper.toUpperCase();
+      if (upper == "AUTO") {
+        mode = MODE_AUTO;
+      } else if (upper == "MANUAL") {
+        mode = MODE_MANUAL;
+      } else {
+        outError = "Invalid mode. Allowed: 'AUTO' or 'MANUAL'";
+        return false;
+      }
     }
+
+    // If command specified actuators, mode must be MANUAL
+    if (fanCmd >= 0 || peltierCmd >= 0) {
+      mode = MODE_MANUAL;
+    }
+
+    if (mode == MODE_MANUAL) {
+      // Validate fan command
+      if (fanCmd >= 0) {
+        bool targetFan = (fanCmd == 1);
+        // If Peltier is currently ON and heatsink fan is required, reject turning fan OFF
+        if (!targetFan && peltierState && HEATSINK_FAN_INTERLOCK) {
+          outError = "FAN_INTERLOCK_REQUIRED";
+          Serial.println(F("[SAFETY] Fan OFF rejected: Peltier is energized (Heatsink interlock required)"));
+          return false;
+        }
+        setFan(targetFan, "Manual command");
+      }
+
+      // Validate Peltier command
+      if (peltierCmd >= 0) {
+        bool targetPeltier = (peltierCmd == 1);
+        if (targetPeltier && SIMULTANEOUS_LOCKOUT && fanState) {
+          outError = "SIMULTANEOUS_LOCKOUT";
+          return false;
+        }
+        if (!setPeltier(targetPeltier, "Manual command")) {
+          outError = safetyCutoffActive ? "SAFETY_CUTOFF_ACTIVE" : "COMMAND_REJECTED";
+          return false;
+        }
+      }
+    }
+
+    return true;
+  }
+
+  const char* getModeString() const {
+    return (mode == MODE_AUTO) ? "AUTO" : "MANUAL";
   }
 };
 

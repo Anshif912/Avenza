@@ -1,7 +1,7 @@
 import React from 'react';
 import { useMonitoring } from '../context/MonitoringContext';
 import {
-  BarChart3, TrendingDown, Activity, Download
+  BarChart3, Activity, Download
 } from 'lucide-react';
 import {
   ResponsiveContainer, AreaChart, Area, LineChart, Line,
@@ -14,11 +14,10 @@ export const AnalyticsPage: React.FC = () => {
 
   const hasData = waveforms.length > 0;
   const last120 = waveforms.slice(-120);
-  const last60  = waveforms.slice(-60);
 
   // Apnea score distribution (bucketed)
   const buckets = Array.from({ length: 10 }, (_, i) => ({
-    range: `${i * 10}–${i * 10 + 9}`,
+    range: `${i * 10}–${i * 10 + 9}%`,
     count: last120.filter(w => (w.aiProbability ?? 0) >= i * 10 && (w.aiProbability ?? 0) < (i + 1) * 10).length
   }));
 
@@ -31,13 +30,13 @@ export const AnalyticsPage: React.FC = () => {
 
   const handleExportCSV = () => {
     if (!waveforms.length) return;
-    const header = 'AVENZA Clinical Telemetry Export\nSubject,' + (session.subjectId || 'AVZ-001') + ',Session,' + (session.sessionId || 'SES-01') + '\nTimestamp,Heart Rate (BPM),SpO2 (%),AI Apnea Score (%),Camera Motion\n';
+    const header = 'NeoNattle Telemetry Export (Developed by Avenza)\nSubject,' + (session.subjectId || 'SUBJ-001') + ',Session,' + (session.sessionId || 'SES-01') + '\nTimestamp,Heart Rate (BPM),SpO2 (%),AI Apnea Score (%),Camera Motion\n';
     const rows = waveforms.map(w => `${w.timestamp},${w.heartRate ?? ''},${w.spo2 ?? ''},${w.aiProbability ?? ''},${w.cameraMovement ?? ''}`).join('\n');
     const blob = new Blob([header + rows], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.setAttribute('download', `AVENZA_Telemetry_${session.subjectId || 'AVZ-001'}_${Date.now()}.csv`);
+    link.setAttribute('download', `NeoNattle_Telemetry_${session.subjectId || 'SUBJ-001'}_${Date.now()}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -48,138 +47,100 @@ export const AnalyticsPage: React.FC = () => {
   };
 
   return (
-    <div className="space-y-6 animate-fade-in-up">
+    <div className="space-y-6">
       <SectionHeader
         icon={BarChart3}
-        title="Clinical Telemetry Analytics"
-        subtitle="Session-level trends, apnea score distribution, and thermal stability analysis"
-        badge={hasData ? 'LIVE SESSION STREAM' : 'NO DATA RECORDED'}
-        badgeVariant={hasData ? 'emerald' : 'cyan'}
+        title="Signal Analytics &amp; Session Reports"
+        subtitle="Longitudinal telemetry trends, score distribution histograms, and CSV data export"
+        badge={hasData ? 'TELEMETRY ACTIVE' : 'NO SAMPLES'}
+        badgeVariant={hasData ? 'emerald' : 'blue'}
         action={
           <div className="flex items-center gap-2">
             <button
               onClick={handleExportCSV}
               disabled={!hasData}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-surface-2 hover:bg-surface-1 text-slate-300 border border-line-0 rounded-xl text-xs font-mono transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-lg text-xs font-sans font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer shadow-xs"
             >
-              <Download className="w-3.5 h-3.5" /> CSV
+              <Download className="w-3.5 h-3.5" /> CSV Export
             </button>
             <button
               onClick={handleExportPDF}
               disabled={!hasData}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-surface-2 hover:bg-surface-1 text-slate-300 border border-line-0 rounded-xl text-xs font-mono transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-lg text-xs font-sans font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer shadow-xs"
             >
-              <Download className="w-3.5 h-3.5" /> PDF
+              <Download className="w-3.5 h-3.5" /> Print Report
             </button>
           </div>
         }
       />
 
-      {/* Session overview metrics — simple flex strip */}
-      <div className="flex flex-wrap gap-4">
+      {/* Session overview metric strip */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         {[
-          { label: 'Session Duration', value: session.status === 'ACTIVE' ? formatDuration(session.durationSeconds) : '--:--:--', color: 'text-cyan-300' },
-          { label: 'Total Events', value: String(apneaEventAlerts.length), color: 'text-rose-300' },
-          { label: 'Unacknowledged', value: String(alerts.filter(a => !a.acknowledged).length), color: 'text-amber-300' },
-          { label: 'Current AI Score', value: apnea.state !== 'NO_EVALUATION' ? `${apnea.probability}%` : '--', color: 'text-violet-300' },
+          { label: 'Session Duration', value: session.status === 'ACTIVE' ? formatDuration(session.durationSeconds) : '—', color: 'text-blue-700' },
+          { label: 'Candidate Incidents', value: String(apneaEventAlerts.length), color: 'text-rose-600' },
+          { label: 'Unacknowledged', value: String(alerts.filter(a => !a.acknowledged).length), color: 'text-amber-700' },
+          { label: 'Current Score', value: typeof apnea.probability === 'number' && apnea.state !== 'NO_EVALUATION' ? `${Math.round(apnea.probability)}%` : '—', color: 'text-violet-700' },
         ].map(m => (
-          <div key={m.label} className="flex-1 min-w-[120px] bg-surface-1 border border-line-0 rounded-card p-4 space-y-1">
-            <div className="text-[10px] font-mono text-slate-500 uppercase tracking-wider">{m.label}</div>
-            <div className={`text-2xl font-mono font-extrabold tabular-nums ${m.color}`}>{m.value}</div>
+          <div key={m.label} className="bg-white border border-slate-200 rounded-xl p-4 space-y-1 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+            <span className="text-[11px] text-slate-500 font-sans block">{m.label}</span>
+            <div className={`text-2xl font-mono font-bold tabular-nums ${m.color}`}>{m.value}</div>
           </div>
         ))}
       </div>
 
       {!hasData ? (
-        <div className="bg-surface-1 border border-line-0 rounded-2xl p-12 text-center space-y-4">
-          <BarChart3 className="w-12 h-12 text-slate-600 mx-auto animate-pulse" />
+        <div className="bg-white border border-slate-200 rounded-xl p-12 text-center space-y-4 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+          <BarChart3 className="w-10 h-10 text-slate-300 mx-auto" />
           <div className="space-y-1">
-            <h3 className="text-base font-bold text-slate-200">NO ANALYTICS DATA AVAILABLE</h3>
-            <p className="text-xs text-slate-400 max-w-md mx-auto font-mono">
-              Live monitoring telemetry has not recorded historical frames yet. Connect the ESP32 hardware via USB Serial or start camera monitoring in Patient Setup.
+            <h3 className="text-sm font-semibold text-[#172033]">No Analytics Data Recorded</h3>
+            <p className="text-xs text-slate-500 max-w-md mx-auto font-sans">
+              Historical analysis requires incoming telemetry frames. Connect your ESP32 hardware via USB Web Serial or start demonstration mode.
             </p>
           </div>
         </div>
       ) : (
-        <>
-          {/* HR & SpO2 vital trends — full width area chart */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Activity className="w-4 h-4 text-cyan-400" />
-                <h3 className="text-sm font-sans font-bold text-slate-200">Heart Rate & SpO₂ Trends</h3>
-              </div>
-              <DataSourceBadge source="MEASURED" />
-            </div>
-            <div className="h-52 chart-container p-3">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Chart 1: Pulse Rate Trend */}
+          <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-3 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+            <h3 className="text-xs font-semibold text-[#172033]">
+              Heart Rate Trend (Last 120 Samples)
+            </h3>
+            <div className="h-56 p-2 bg-slate-50 rounded-lg border border-slate-200">
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={last120} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="hrArea" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#38bdf8" stopOpacity={0.25} />
-                      <stop offset="95%" stopColor="#38bdf8" stopOpacity={0} />
-                    </linearGradient>
-                    <linearGradient id="spo2Area" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#10b981" stopOpacity={0.25} />
-                      <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#1c2d5a" />
-                  <XAxis dataKey="timestamp" stroke="#374151" tick={{ fontSize: 8, fill: '#64748b' }} interval={20} />
-                  <YAxis domain={['auto', 'auto']} stroke="#374151" tick={{ fontSize: 8, fill: '#64748b' }} />
-                  <YAxis yAxisId="spo2" domain={[80, 100]} orientation="right" stroke="#374151" tick={{ fontSize: 8, fill: '#64748b' }} />
-                  <Tooltip contentStyle={{ backgroundColor: '#0d1527', borderColor: '#1c2d5a', fontSize: 11, fontFamily: 'JetBrains Mono, monospace' }} />
-                  <Area type="monotone" dataKey="heartRate" name="HR (BPM)" stroke="#38bdf8" fill="url(#hrArea)" strokeWidth={1.5} dot={false} isAnimationActive={false} />
-                  <Area yAxisId="spo2" type="monotone" dataKey="spo2" name="SpO₂ (%)" stroke="#10b981" fill="url(#spo2Area)" strokeWidth={1.5} dot={false} isAnimationActive={false} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
+                  <XAxis dataKey="timestamp" stroke="#CBD5E1" tick={{ fontSize: 9, fill: '#64748B', fontFamily: 'IBM Plex Mono' }} />
+                  <YAxis domain={['auto', 'auto']} stroke="#CBD5E1" tick={{ fontSize: 9, fill: '#64748B', fontFamily: 'IBM Plex Mono' }} />
+                  <Tooltip
+                    contentStyle={{ backgroundColor: '#FFFFFF', borderColor: '#CBD5E1', fontSize: 11, fontFamily: 'IBM Plex Mono, monospace', borderRadius: '6px' }}
+                  />
+                  <Area type="monotone" dataKey="heartRate" stroke="#2563EB" fill="#EFF6FF" strokeWidth={1.5} />
                 </AreaChart>
               </ResponsiveContainer>
             </div>
           </div>
 
-          {/* AI Score distribution + Camera motion — two charts side by side */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-            {/* Score histogram */}
-            <div className="space-y-2">
-              <div className="flex items-center gap-2">
-                <TrendingDown className="w-4 h-4 text-violet-400" />
-                <h3 className="text-sm font-sans font-bold text-slate-200">Prototype Score Distribution</h3>
-              </div>
-              <div className="h-48 chart-container p-3">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={buckets} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#1c2d5a" vertical={false} />
-                    <XAxis dataKey="range" stroke="#374151" tick={{ fontSize: 8, fill: '#64748b' }} />
-                    <YAxis stroke="#374151" tick={{ fontSize: 8, fill: '#64748b' }} />
-                    <Tooltip contentStyle={{ backgroundColor: '#0d1527', borderColor: '#1c2d5a', fontSize: 11, fontFamily: 'JetBrains Mono, monospace' }} />
-                    <Bar dataKey="count" name="Sample count" fill="#8b5cf6" fillOpacity={0.8} radius={[2, 2, 0, 0]} isAnimationActive={false} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-              <div className="text-[10px] font-mono text-slate-500 italic">MODEL OUTPUT — NOT A DIAGNOSIS</div>
-            </div>
-
-            {/* Camera motion trend */}
-            <div className="space-y-2">
-              <div className="flex items-center gap-2">
-                <Activity className="w-4 h-4 text-purple-400" />
-                <h3 className="text-sm font-sans font-bold text-slate-200">Camera-Derived Respiratory Motion</h3>
-              </div>
-              <div className="h-48 chart-container p-3">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={last60} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#1c2d5a" />
-                    <XAxis dataKey="timestamp" stroke="#374151" tick={{ fontSize: 8, fill: '#64748b' }} interval={10} />
-                    <YAxis domain={[0, 1]} stroke="#374151" tick={{ fontSize: 8, fill: '#64748b' }} />
-                    <Tooltip contentStyle={{ backgroundColor: '#0d1527', borderColor: '#1c2d5a', fontSize: 11, fontFamily: 'JetBrains Mono, monospace' }} />
-                    <Line type="monotone" dataKey="cameraMovement" name="Camera Motion (amp)" stroke="#a855f7" strokeWidth={1.5} dot={false} isAnimationActive={false} />
-                    <Line type="monotone" dataKey="respiratoryMotionEst" name="Resp. Motion Est." stroke="#34d399" strokeWidth={1.5} strokeDasharray="3 2" dot={false} isAnimationActive={false} />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
-              <div className="text-[10px] font-mono text-slate-500 italic">Laptop Webcam → Chest/Abdomen ROI → Camera-Derived Respiratory Motion Evidence</div>
+          {/* Chart 2: Apnea Score Histogram */}
+          <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-3 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+            <h3 className="text-xs font-semibold text-[#172033]">
+              Prototype Apnea Score Distribution
+            </h3>
+            <div className="h-56 p-2 bg-slate-50 rounded-lg border border-slate-200">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={buckets} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
+                  <XAxis dataKey="range" stroke="#CBD5E1" tick={{ fontSize: 8, fill: '#64748B', fontFamily: 'IBM Plex Mono' }} />
+                  <YAxis stroke="#CBD5E1" tick={{ fontSize: 9, fill: '#64748B', fontFamily: 'IBM Plex Mono' }} />
+                  <Tooltip
+                    contentStyle={{ backgroundColor: '#FFFFFF', borderColor: '#CBD5E1', fontSize: 11, fontFamily: 'IBM Plex Mono, monospace', borderRadius: '6px' }}
+                  />
+                  <Bar dataKey="count" fill="#7C3AED" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
             </div>
           </div>
-        </>
+        </div>
       )}
     </div>
   );

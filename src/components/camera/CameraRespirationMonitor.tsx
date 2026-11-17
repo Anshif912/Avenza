@@ -87,13 +87,13 @@ export const CameraRespirationMonitor: React.FC = () => {
   }, []);
 
   return (
-    <div className="bg-surface-1 border border-line-0 rounded-card p-5 shadow-card space-y-5 font-mono">
+    <div className="bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-xs space-y-5 font-mono">
       
       {/* Panel Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line-0 pb-3">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#E2E8F0] pb-3">
         <div className="flex items-center space-x-2">
-          <Camera className="w-5 h-5 text-violet-400" />
-          <h3 className="text-sm font-bold text-slate-100 font-sans tracking-tight">
+          <Camera className="w-5 h-5 text-blue-600" />
+          <h3 className="text-sm font-bold text-[#172033] font-sans tracking-tight">
             Non-Contact Thoracic Motion Monitor
           </h3>
         </div>
@@ -101,8 +101,8 @@ export const CameraRespirationMonitor: React.FC = () => {
         <div className="flex items-center space-x-2">
           <span className={`px-2.5 py-0.5 rounded text-[10px] font-extrabold ${
             isWebcamActive
-              ? 'bg-cyan-950 text-cyan-300 border border-cyan-500/40'
-              : 'bg-slate-900 text-slate-400 border border-slate-700'
+              ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+              : 'bg-slate-100 text-slate-600 border border-slate-200'
           }`}>
             {isWebcamActive ? 'REAL CAMERA SIGNAL' : 'CAMERA NOT STARTED'}
           </span>
@@ -115,7 +115,7 @@ export const CameraRespirationMonitor: React.FC = () => {
         
         {/* Left: Video Preview & Controls */}
         <div className="space-y-3">
-          <div className="relative w-full h-48 bg-surface-0 rounded-xl overflow-hidden border border-line-0 flex items-center justify-center">
+          <div className="relative w-full h-48 bg-[#F8FAFC] rounded-xl overflow-hidden border border-[#E2E8F0] flex items-center justify-center">
             {/* Live Video Element */}
             <video
               ref={videoRef}
@@ -131,9 +131,9 @@ export const CameraRespirationMonitor: React.FC = () => {
 
             {/* Offline / Placeholder View */}
             {!isWebcamActive && (
-              <div className="text-center p-4 space-y-2 text-slate-400">
-                <Camera className="w-10 h-10 mx-auto text-slate-600 animate-pulse" />
-                <div className="text-xs font-semibold text-slate-300 font-sans">
+              <div className="text-center p-4 space-y-2 text-slate-500">
+                <Camera className="w-10 h-10 mx-auto text-slate-400" />
+                <div className="text-xs font-semibold text-slate-800 font-sans">
                   Camera Stream Inactive
                 </div>
                 <div className="text-[10px] text-slate-500 max-w-xs font-sans">
@@ -144,9 +144,9 @@ export const CameraRespirationMonitor: React.FC = () => {
 
             {/* ROI Target Box when active */}
             {isWebcamActive && (
-              <div className="absolute inset-x-[20%] inset-y-[25%] border-2 border-dashed border-cyan-400/80 rounded-lg pointer-events-none flex items-start justify-between p-1 bg-cyan-500/10">
-                <span className="text-[8px] bg-cyan-950 text-cyan-300 px-1 rounded font-bold">THORACIC ROI</span>
-                <span className="text-[8px] bg-cyan-950 text-cyan-300 px-1 rounded font-bold">LOCKED</span>
+              <div className="absolute inset-x-[20%] inset-y-[25%] border-2 border-dashed border-blue-500 rounded-lg pointer-events-none flex items-start justify-between p-1 bg-blue-500/10">
+                <span className="text-[8px] bg-blue-600 text-white px-1.5 py-0.5 rounded font-bold">THORACIC ROI</span>
+                <span className="text-[8px] bg-blue-600 text-white px-1.5 py-0.5 rounded font-bold">LOCKED</span>
               </div>
             )}
           </div>
@@ -156,7 +156,7 @@ export const CameraRespirationMonitor: React.FC = () => {
             {!isWebcamActive ? (
               <button
                 onClick={handleStartCamera}
-                className="flex-1 flex items-center justify-center space-x-2 py-2.5 px-4 bg-medical-cyan hover:brightness-110 text-black font-extrabold text-xs font-sans rounded-xl shadow-md shadow-cyan-500/15 transition-all cursor-pointer"
+                className="flex-1 flex items-center justify-center space-x-2 py-2 px-4 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs font-sans rounded-xl shadow-xs transition-colors cursor-pointer"
               >
                 <Play className="w-3.5 h-3.5" />
                 <span>Start Real Webcam</span>
@@ -165,14 +165,14 @@ export const CameraRespirationMonitor: React.FC = () => {
               <>
                 <button
                   onClick={handleStopCamera}
-                  className="flex-1 flex items-center justify-center space-x-2 py-2 px-3 bg-rose-950/80 hover:bg-rose-900 text-rose-300 border border-rose-500/40 font-bold text-xs rounded-xl transition-colors cursor-pointer"
+                  className="flex-1 flex items-center justify-center space-x-2 py-2 px-3 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold text-xs rounded-xl transition-colors cursor-pointer shadow-xs"
                 >
                   <Square className="w-3.5 h-3.5" />
                   <span>Stop Stream</span>
                 </button>
                 <button
                   onClick={handleRecalibrate}
-                  className="flex items-center space-x-1.5 py-2 px-3 bg-surface-2 hover:bg-surface-0 text-slate-300 border border-line-0 text-xs rounded-xl transition-colors cursor-pointer"
+                  className="flex items-center space-x-1.5 py-2 px-3 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 text-xs rounded-xl transition-colors cursor-pointer shadow-xs"
                 >
                   <RefreshCw className="w-3 h-3" />
                   <span>Recalibrate</span>
@@ -187,34 +187,34 @@ export const CameraRespirationMonitor: React.FC = () => {
           
           {/* Status Matrix */}
           <div className="grid grid-cols-2 gap-2 text-xs">
-            <div className="p-3 bg-surface-0 border border-line-0 rounded-xl space-y-1">
-              <span className="text-[10px] text-slate-400">Motion Amplitude</span>
-              <div className="text-lg font-extrabold text-violet-300 tabular-nums">
+            <div className="p-3 bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl space-y-1">
+              <span className="text-[10px] text-slate-500">Motion Amplitude</span>
+              <div className="text-lg font-extrabold text-blue-700 tabular-nums">
                 {cameraTelemetry.amplitude !== null ? `${(cameraTelemetry.amplitude * 100).toFixed(1)}%` : '--'}
               </div>
             </div>
 
-            <div className="p-3 bg-surface-0 border border-line-0 rounded-xl space-y-1">
-              <span className="text-[10px] text-slate-400">Estimated Rate</span>
-              <div className="text-lg font-extrabold text-teal-300 tabular-nums">
+            <div className="p-3 bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl space-y-1">
+              <span className="text-[10px] text-slate-500">Estimated Rate</span>
+              <div className="text-lg font-extrabold text-teal-700 tabular-nums">
                 {cameraTelemetry.rate !== null ? `${cameraTelemetry.rate} BrPM` : '--'}
               </div>
             </div>
 
-            <div className="p-3 bg-surface-0 border border-line-0 rounded-xl space-y-1">
-              <span className="text-[10px] text-slate-400">Tracking Status</span>
+            <div className="p-3 bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl space-y-1">
+              <span className="text-[10px] text-slate-500">Tracking Status</span>
               <div className={`text-xs font-bold ${
-                cameraTelemetry.tracking === 'LOCKED' ? 'text-emerald-400' :
-                cameraTelemetry.tracking === 'NOT_STARTED' ? 'text-slate-500' : 'text-amber-400'
+                cameraTelemetry.tracking === 'LOCKED' ? 'text-emerald-700' :
+                cameraTelemetry.tracking === 'NOT_STARTED' ? 'text-slate-500' : 'text-amber-700'
               }`}>
                 {cameraTelemetry.tracking.replace('_', ' ')}
               </div>
             </div>
 
-            <div className="p-3 bg-surface-0 border border-line-0 rounded-xl space-y-1">
-              <span className="text-[10px] text-slate-400">Baseline Delta</span>
+            <div className="p-3 bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl space-y-1">
+              <span className="text-[10px] text-slate-500">Baseline Delta</span>
               <div className={`text-xs font-bold ${
-                cameraTelemetry.delta < -20 ? 'text-rose-400' : 'text-slate-300'
+                cameraTelemetry.delta < -20 ? 'text-rose-600' : 'text-slate-700'
               }`}>
                 {cameraTelemetry.amplitude !== null ? `${cameraTelemetry.delta > 0 ? '+' : ''}${cameraTelemetry.delta.toFixed(1)}%` : '--'}
               </div>
@@ -222,22 +222,22 @@ export const CameraRespirationMonitor: React.FC = () => {
           </div>
 
           {/* Mini Real-Time Optical Flow Waveform */}
-          <div className="h-24 bg-surface-0 rounded-xl p-2 border border-line-0">
+          <div className="h-24 bg-[#F8FAFC] rounded-xl p-2 border border-[#E2E8F0]">
             {graphData.length > 0 ? (
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={graphData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#1c2d5a" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
                   <YAxis domain={[0, 1]} hide />
                   <XAxis dataKey="time" hide />
                   <Tooltip
-                    contentStyle={{ backgroundColor: '#0d1527', borderColor: '#1c2d5a', fontSize: 10 }}
-                    labelStyle={{ color: '#06b6d4' }}
+                    contentStyle={{ backgroundColor: '#FFFFFF', borderColor: '#E2E8F0', fontSize: 10, borderRadius: '8px' }}
+                    labelStyle={{ color: '#0F172A' }}
                   />
                   <Line
                     type="monotone"
                     dataKey="amp"
                     name="Motion Amp"
-                    stroke="#a855f7"
+                    stroke="#2563EB"
                     strokeWidth={2}
                     dot={false}
                     isAnimationActive={false}
@@ -255,8 +255,8 @@ export const CameraRespirationMonitor: React.FC = () => {
       </div>
 
       {/* Medical Technology Disclaimer */}
-      <div className="p-3 bg-violet-950/20 border border-violet-500/20 rounded-xl text-[10px] font-sans text-slate-400 leading-relaxed">
-        <strong className="text-violet-300 font-mono">Camera Provenance Chain:</strong> Laptop Webcam → Chest / Abdomen ROI → Optical Frame Differencing → Camera-Derived Respiratory Motion Evidence. Non-contact motion evidence is evaluated in combination with optical PPG; camera evidence alone does not produce a clinical diagnosis.
+      <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl text-[10px] font-sans text-slate-600 leading-relaxed">
+        <strong className="text-blue-900 font-mono">Camera Provenance Chain:</strong> Laptop Webcam → Chest / Abdomen ROI → Optical Frame Differencing → Camera-Derived Respiratory Motion Evidence. Non-contact motion evidence is evaluated in combination with optical PPG; camera evidence alone does not produce a clinical diagnosis.
       </div>
 
     </div>
